@@ -1,0 +1,16 @@
+CONDITION,Pallet ID,CATEGORY,SUBCATEGORY,ASIN,Item Desc,QTY,ItemPkgWeight,ItemPkgWeightUOM,CURRENCY CODE,TOTAL RETAIL,UNIT RETAIL
+Customer Damage,LOT-SAMPLE-001,Home Improvement,Power Tools,B0SAMPLE01,Cordless Drill 18V with 2 batteries and charger,1,2400,GR,EUR,129.99,129.99
+Customer Returns,LOT-SAMPLE-001,Home & Garden,Outdoor Furniture,B0SAMPLE02,4-piece rattan garden sofa set with cushions,1,38000,GR,EUR,499.00,499.00
+Defective,LOT-SAMPLE-001,Electronics,Headphones,B0SAMPLE03,Wireless noise cancelling over-ear headphones,2,350,GR,EUR,318.00,159.00
+Customer Returns,LOT-SAMPLE-001,Kitchen,Small Appliances,B0SAMPLE04,1.7L stainless steel electric kettle,3,1500,GR,EUR,89.97,29.99
+Customer Damage,LOT-SAMPLE-001,Home Improvement,Hand Tools,B0SAMPLE05,Bench vice 125mm swivel base,1,4200,GR,EUR,54.90,54.90
+Customer Returns,LOT-SAMPLE-001,Toys,Building Sets,B0SAMPLE06,1200-piece construction brick set,2,2200,GR,EUR,159.98,79.99
+Defective,LOT-SAMPLE-001,Electronics,Tablets,B0SAMPLE07,10-inch Android tablet 64GB,1,520,GR,EUR,199.99,199.99
+Customer Returns,LOT-SAMPLE-001,Sports,Fitness Equipment,B0SAMPLE08,Adjustable dumbbell set 24kg,1,24000,GR,EUR,229.00,229.00
+Customer Returns,LOT-SAMPLE-001,Home & Garden,Vacuum Cleaners,B0SAMPLE09,Cordless stick vacuum cleaner,1,3100,GR,EUR,279.00,279.00
+Customer Damage,LOT-SAMPLE-001,Kitchen,Cookware,B0SAMPLE10,10-piece non-stick cookware set,2,7800,GR,EUR,179.98,89.99
+Customer Returns,LOT-SAMPLE-001,Electronics,Monitors,B0SAMPLE11,27-inch QHD IPS monitor,1,5600,GR,EUR,239.00,239.00
+Defective,LOT-SAMPLE-001,Baby,Strollers,B0SAMPLE12,Lightweight foldable travel stroller,1,7200,GR,EUR,189.00,189.00
+Customer Returns,LOT-SAMPLE-001,Home Improvement,Lighting,B0SAMPLE13,Smart LED ceiling light with remote,4,1800,GR,EUR,159.96,39.99
+Customer Returns,LOT-SAMPLE-001,Pet Supplies,Pet Beds,B0SAMPLE14,Orthopedic dog bed large,2,4400,GR,EUR,99.98,49.99
+Customer Damage,LOT-SAMPLE-001,Electronics,Smart Home,B0SAMPLE15,Smart thermostat with app control,1,600,GR,EUR,179.00,179.00
