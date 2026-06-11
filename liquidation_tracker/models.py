@@ -38,11 +38,18 @@ class ManifestItem:
     asin: Optional[str] = None
     category: Optional[str] = None
     subcategory: Optional[str] = None
+    department: Optional[str] = None
     description: Optional[str] = None
     condition: Optional[str] = None
     qty: int = 1
     unit_retail: float = 0.0
     weight_kg: Optional[float] = None
+    pallet_id: Optional[str] = None   # physical pallet ("Pallet ID")
+    box_id: Optional[str] = None      # physical box/package ("PkgID")
+
+    @property
+    def line_retail(self) -> float:
+        return self.unit_retail * self.qty
 
 
 @dataclass

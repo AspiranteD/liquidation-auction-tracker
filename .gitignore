@@ -15,6 +15,7 @@ env/
 # Local data (keep the sample manifest, ignore real runs)
 data/*.db
 data/manifests/
+data/reports/
 *.log
 
 # OS / editor

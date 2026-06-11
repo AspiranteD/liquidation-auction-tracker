@@ -21,7 +21,7 @@ import logging
 import os
 import sys
 
-from . import analyzer
+from . import analyzer, insights
 from .calculator import BidCalculator
 from .client import BStockClient, CloudflareChallenge
 from .config import Settings
@@ -112,6 +112,96 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     return 0
 
 
+def _write_report(report: str, dest_dir: str, stem: str) -> str:
+    os.makedirs(dest_dir, exist_ok=True)
+    path = os.path.join(dest_dir, f"{stem}.md")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(report)
+    return path
+
+
+def _print_insights_summary(result: insights.ManifestInsights) -> None:
+    print(f"\n=== {result.label} ===")
+    print(f"  Lineas/uds    : {result.total_lines} / {result.total_units}")
+    print(f"  Retail        : EUR {result.total_retail:,.2f}")
+    print(f"  TVs (perdida) : {result.tv_units} uds, EUR {result.tv_loss_retail:,.2f}")
+    print(f"  Retail efectivo: EUR {result.effective_retail:,.2f}")
+    sure = sum(1 for g in result.giveaways if g.tier == "seguro")
+    doubt = sum(1 for g in result.giveaways if g.tier == "dudoso")
+    print(f"  Regalados     : {sure} seguros, {doubt} dudosos")
+    print(
+        f"  Contenedores  : {len(result.boxes)} cajas "
+        f"({len(result.suspicious_boxes)} sospechosas), {len(result.pallets)} pallets "
+        f"({len(result.suspicious_pallets)} sospechosos)"
+    )
+
+
+def cmd_inspect(args: argparse.Namespace) -> int:
+    if not os.path.exists(args.csv):
+        print(f"File not found: {args.csv}", file=sys.stderr)
+        return 2
+    items = analyzer.parse_manifest(args.csv)
+    if not items:
+        print(f"No rows parsed from {args.csv}", file=sys.stderr)
+        return 2
+    stem = os.path.splitext(os.path.basename(args.csv))[0]
+    result = insights.deep_analyze(items, label=stem, verify_prices=args.verify)
+    _print_insights_summary(result)
+    path = _write_report(insights.render_report(result), args.report_dir, stem)
+    print(f"\nInforme completo: {path}")
+    return 0
+
+
+def cmd_manifests(args: argparse.Namespace) -> int:
+    """Download + deep-analyze the manifests of every active auction."""
+    settings = Settings.from_env()
+    client = BStockClient()
+    try:
+        auctions = client.list_auctions(country=args.country)
+    except CloudflareChallenge as exc:
+        print(f"Cloudflare challenge: {exc}", file=sys.stderr)
+        return 2
+
+    os.makedirs(settings.manifest_dir, exist_ok=True)
+    summary_lines = [f"# Manifiestos {args.country} — resumen", ""]
+    analyzed = 0
+    for auction in auctions:
+        label = f"{auction.auction_id} — {auction.title[:70]}"
+        try:
+            lot_id = client.fetch_lot_id(auction)
+            if not lot_id:
+                raise RuntimeError("lot_id no encontrado en la pagina de detalle")
+            csv_path = os.path.join(
+                settings.manifest_dir, f"{auction.auction_id}_{lot_id}.csv"
+            )
+            if not os.path.exists(csv_path):
+                client.download_manifest(lot_id, csv_path)
+            items = analyzer.parse_manifest(csv_path)
+            result = insights.deep_analyze(
+                items, label=label, verify_prices=args.verify
+            )
+            _print_insights_summary(result)
+            stem = f"{auction.auction_id}_{lot_id}"
+            path = _write_report(insights.render_report(result), args.report_dir, stem)
+            summary_lines.append(
+                f"- **#{auction.auction_id}** retail efectivo EUR "
+                f"{result.effective_retail:,.0f} (TVs -EUR {result.tv_loss_retail:,.0f}), "
+                f"{len(result.giveaways)} regalados, "
+                f"{len(result.suspicious_boxes)} cajas sospechosas -> [{stem}.md]({stem}.md)"
+            )
+            analyzed += 1
+        except Exception as exc:  # noqa: BLE001 - keep going per auction
+            print(f"\n=== {label} ===\n  SIN MANIFIESTO: {exc}")
+            summary_lines.append(f"- **#{auction.auction_id}** sin manifiesto: {exc}")
+
+    summary_path = _write_report(
+        "\n".join(summary_lines) + "\n", args.report_dir, f"resumen_{args.country}"
+    )
+    print(f"\n{analyzed}/{len(auctions)} manifiestos analizados.")
+    print(f"Resumen: {summary_path}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="liquidation_tracker",
@@ -141,9 +231,27 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Target landed cost as fraction of retail")
     p_bid.set_defaults(func=cmd_bid)
 
-    p_analyze = sub.add_parser("analyze", help="Analyze a manifest CSV")
+    p_analyze = sub.add_parser("analyze", help="Analyze a manifest CSV (quick stats)")
     p_analyze.add_argument("csv")
     p_analyze.set_defaults(func=cmd_analyze)
+
+    p_inspect = sub.add_parser(
+        "inspect", help="Deep-analyze a manifest CSV (TVs, regalados, cajas/pallets)"
+    )
+    p_inspect.add_argument("csv")
+    p_inspect.add_argument("--verify", action="store_true",
+                           help="Try a live Amazon price check on doubtful giveaways")
+    p_inspect.add_argument("--report-dir", default="data/reports")
+    p_inspect.set_defaults(func=cmd_inspect)
+
+    p_manifests = sub.add_parser(
+        "manifests", help="Download + deep-analyze manifests of all active auctions"
+    )
+    p_manifests.add_argument("--country", default="ES")
+    p_manifests.add_argument("--verify", action="store_true",
+                             help="Try a live Amazon price check on doubtful giveaways")
+    p_manifests.add_argument("--report-dir", default="data/reports")
+    p_manifests.set_defaults(func=cmd_manifests)
 
     return parser
 

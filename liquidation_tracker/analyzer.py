@@ -7,6 +7,7 @@ items. These feed both the alert rules and the human-readable reports.
 from __future__ import annotations
 
 import csv
+import io
 from collections import defaultdict
 from typing import Dict, List
 
@@ -19,6 +20,7 @@ _FIELD_ALIASES = {
     "asin": ["asin"],
     "category": ["category"],
     "subcategory": ["subcategory"],
+    "department": ["department"],
     "description": ["item desc", "item_desc", "description"],
     "condition": ["condition"],
     "qty": ["qty", "quantity"],
@@ -26,6 +28,8 @@ _FIELD_ALIASES = {
     "total_retail": ["total retail", "total_retail"],
     "weight": ["itempkgweight", "item pkg weight"],
     "weight_uom": ["itempkgweightuom", "item pkg weight uom"],
+    "pallet_id": ["pallet id", "pallet_id", "palletid"],
+    "box_id": ["pkgid", "pkg id", "box id", "box_id"],
 }
 
 
@@ -57,10 +61,24 @@ def _to_int(value: str, default: int = 1) -> int:
         return default
 
 
+def _read_text(csv_path: str) -> str:
+    """Read the CSV decoding UTF-8 first, falling back to cp1252.
+
+    Real B-Stock manifests are often cp1252-encoded (accented Spanish/German
+    descriptions); decoding them as UTF-8 mangles every accent.
+    """
+    with open(csv_path, "rb") as fh:
+        raw = fh.read()
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return raw.decode("cp1252", errors="replace")
+
+
 def parse_manifest(csv_path: str) -> List[ManifestItem]:
     """Read a manifest CSV into a list of ManifestItem."""
     items: List[ManifestItem] = []
-    with open(csv_path, newline="", encoding="utf-8", errors="replace") as fh:
+    with io.StringIO(_read_text(csv_path), newline="") as fh:
         reader = csv.DictReader(fh)
         if not reader.fieldnames:
             return items
@@ -84,11 +102,14 @@ def parse_manifest(csv_path: str) -> List[ManifestItem]:
                     asin=row.get(idx.get("asin", "")) or None,
                     category=row.get(idx.get("category", "")) or None,
                     subcategory=row.get(idx.get("subcategory", "")) or None,
+                    department=row.get(idx.get("department", "")) or None,
                     description=row.get(idx.get("description", "")) or None,
                     condition=row.get(idx.get("condition", "")) or None,
                     qty=qty,
                     unit_retail=unit_retail,
                     weight_kg=weight_kg or None,
+                    pallet_id=row.get(idx.get("pallet_id", "")) or None,
+                    box_id=row.get(idx.get("box_id", "")) or None,
                 )
             )
     return items

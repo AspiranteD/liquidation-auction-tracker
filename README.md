@@ -111,12 +111,36 @@ python -m liquidation_tracker.cli bid --retail 16670 --type "Small Truckload" --
 # List active auctions for a country, with suggested bids (live)
 python -m liquidation_tracker.cli list --country ES
 
-# Analyze a manifest CSV
+# Analyze a manifest CSV (quick aggregate stats)
 python -m liquidation_tracker.cli analyze data/sample_manifest.csv
 
-# Full pipeline: scrape -> evaluate -> store in SQLite -> email key auctions
+# Deep-analyze a manifest: TVs (loss), mispriced "giveaways", box/pallet density
+python -m liquidation_tracker.cli inspect data/manifests/lot.csv
+
+# Download + deep-analyze the manifests of every active auction (markdown reports)
+python -m liquidation_tracker.cli manifests --country ES
+
+# Full pipeline: scrape -> evaluate -> store in SQLite -> alert key auctions
 python -m liquidation_tracker.cli monitor --country ES
 ```
+
+## Deep manifest analysis
+
+`inspect` / `manifests` go beyond aggregate stats (module `insights.py`):
+
+- Units and retail value per **department, category and subcategory**.
+- **TVs**: panels in liquidation lots arrive broken, so their declared retail
+  is treated as a loss and subtracted from the lot's *effective retail*.
+- **Giveaways**: premium products (iPhones, MacBooks, lenses, consoles...)
+  declared at absurd prices because they were misclassified. Accessory and
+  compatibility mentions ("case for iPhone 16") are excluded; findings come
+  in two tiers (sure / doubtful) with a direct Amazon link to verify, plus an
+  optional `--verify` live price check.
+- **Box/pallet density**: Amazon fills containers to the top — a box with 2
+  declared items (or with far less declared value than its siblings) means
+  undeclared content. Flagged against the lot's own median.
+
+Reports land in `data/reports/` as markdown, one per lot plus a summary.
 
 ## Alerts (email + WhatsApp)
 
@@ -177,6 +201,7 @@ liquidation_tracker/
 ├── parser.py       # HTML -> Auction models (unit-testable)
 ├── calculator.py   # the bid calculator (landed-cost model)
 ├── analyzer.py     # manifest CSV -> aggregate stats
+├── insights.py     # deep manifest analysis (TVs, giveaways, box density)
 ├── alerts.py       # rule engine: is this auction key?
 ├── notifier.py     # email (SMTP) + WhatsApp (CallMeBot) alerts
 ├── storage.py      # SQLite persistence + bid history
