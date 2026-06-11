@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import smtplib
 from email.message import EmailMessage
 from typing import Optional
@@ -49,7 +50,9 @@ class EmailNotifier:
     def __init__(self, config: EmailConfig) -> None:
         self.config = config
 
-    def send(self, subject: str, body: str) -> bool:
+    def send(
+        self, subject: str, body: str, attachments: Optional[list] = None
+    ) -> bool:
         cfg = self.config
         if not cfg.enabled:
             logger.info("Email alerts disabled; skipping send for: %s", subject)
@@ -63,6 +66,15 @@ class EmailNotifier:
         msg["From"] = cfg.sender or cfg.username
         msg["To"] = ", ".join(cfg.recipients)
         msg.set_content(body)
+
+        for path in attachments or []:
+            with open(path, "rb") as fh:
+                msg.add_attachment(
+                    fh.read(),
+                    maintype="application",
+                    subtype="pdf",
+                    filename=os.path.basename(path),
+                )
 
         try:
             with smtplib.SMTP(cfg.smtp_host, cfg.smtp_port, timeout=30) as server:

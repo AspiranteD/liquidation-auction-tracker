@@ -92,6 +92,25 @@ del monitor sin hablarlo (son 2 peticiones extra por subasta clave).
 - Menciones de compatibilidad ("funda para iPhone", "lápiz para Galaxy S25",
   "disquetera compatible con MacBook") ya no disparan regalados.
 
+## 9. Informes programados: limitaciones y pendientes (11/06 tarde)
+
+- **CallMeBot no puede enviar PDFs por WhatsApp** (API gratuita, solo texto).
+  Lo implementado: al detectar lote nuevo te llega un **resumen en texto** al
+  WhatsApp y el **PDF completo viaja en el email** de las 9/12/21h. Si quieres
+  el PDF dentro de WhatsApp de verdad, hace falta WhatsApp Cloud API de Meta
+  (gratis hasta 1.000 conversaciones/mes, requiere alta de Meta Business) o
+  Twilio (de pago). Dime y lo monto.
+- **Email pendiente de credenciales SMTP**: los huecos están en `.env`
+  (`SMTP_USERNAME`, `SMTP_PASSWORD` — con Gmail usa un App Password —,
+  `EMAIL_RECIPIENTS`, y poner `EMAIL_ALERTS_ENABLED=true`). Hasta entonces el
+  digest se genera y queda en `data/reports/pdf/` pero no se envía (lo dice el
+  log). Todo lo demás ya corre.
+- **Ventana del monitor 12:30-16:00**: si algún día una subasta cerrara fuera
+  de esa franja, no tendría recordatorio. Hasta ahora todas cierran entre
+  13:00 y 15:30, así que encaja. El watch de lotes nuevos sí corre 24/7.
+- **El PC debe estar encendido a las 12:30**: la tarea diaria con repetición
+  no se recupera si en ese momento está apagado (se reanuda al día siguiente).
+
 ## Cómo usarlo
 
 ```bash

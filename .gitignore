@@ -16,6 +16,7 @@ env/
 data/*.db
 data/manifests/
 data/reports/
+data/watch_state.json
 *.log
 
 # OS / editor

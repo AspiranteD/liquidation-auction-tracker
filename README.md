@@ -122,6 +122,12 @@ python -m liquidation_tracker.cli manifests --country ES
 
 # Full pipeline: scrape -> evaluate -> store in SQLite -> alert key auctions
 python -m liquidation_tracker.cli monitor --country ES
+
+# Detect new auctions, build their PDF report, send a WhatsApp summary
+python -m liquidation_tracker.cli watch
+
+# One combined PDF of every active lot, emailed (SMTP) with the PDF attached
+python -m liquidation_tracker.cli digest
 ```
 
 ## Deep manifest analysis

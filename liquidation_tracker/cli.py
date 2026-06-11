@@ -21,10 +21,11 @@ import logging
 import os
 import sys
 
-from . import analyzer, insights
+from . import analyzer, insights, reports
 from .calculator import BidCalculator
 from .client import BStockClient, CloudflareChallenge
 from .config import Settings
+from .notifier import EmailNotifier, WhatsAppNotifier
 from .pipeline import MonitorPipeline
 
 
@@ -33,6 +34,10 @@ def _setup_logging(verbose: bool) -> None:
         level=logging.DEBUG if verbose else logging.INFO,
         format="[%(levelname)s] %(message)s",
     )
+    # fontTools (pulled in by fpdf2 for font subsetting) logs every glyph at
+    # INFO and floods the monitor logs.
+    logging.getLogger("fontTools").setLevel(logging.WARNING)
+    logging.getLogger("fpdf").setLevel(logging.WARNING)
 
 
 def cmd_monitor(args: argparse.Namespace) -> int:
@@ -202,6 +207,73 @@ def cmd_manifests(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_watch(args: argparse.Namespace) -> int:
+    """Detect new auctions, build their PDF report and ping WhatsApp."""
+    settings = Settings.from_env()
+    client = BStockClient()
+    try:
+        results = reports.collect_reports(client, settings, only_new=True)
+    except CloudflareChallenge as exc:
+        print(f"Cloudflare challenge: {exc}", file=sys.stderr)
+        return 2
+
+    notifier = WhatsAppNotifier(settings.whatsapp)
+    sent = 0
+    for report in results:
+        if report.insights and report.is_new:
+            if notifier.send(reports.build_whatsapp_lot_summary(report)):
+                sent += 1
+    new = sum(1 for r in results if r.insights and r.is_new)
+    failed = sum(1 for r in results if r.error)
+    print(f"Nuevos lotes analizados: {new} (WhatsApp enviados: {sent}, fallos: {failed})")
+    return 0
+
+
+def cmd_digest(args: argparse.Namespace) -> int:
+    """Bundle every active lot into one PDF and email it."""
+    settings = Settings.from_env()
+    client = BStockClient()
+    try:
+        results = reports.collect_reports(client, settings, only_new=False)
+    except CloudflareChallenge as exc:
+        print(f"Cloudflare challenge: {exc}", file=sys.stderr)
+        return 2
+
+    if not results:
+        print("Sin subastas activas; no se genera digest.")
+        return 0
+
+    from datetime import datetime
+
+    stamp = datetime.now().strftime("%Y%m%d_%H%M")
+    pdf_path = os.path.join(args.report_dir, "pdf", f"digest_{stamp}.pdf")
+    reports.build_digest_pdf(results, pdf_path)
+    print(f"Digest PDF: {pdf_path}")
+
+    analyzed = [r for r in results if r.insights]
+    body_lines = [f"Informe de pallets B-Stock ({len(analyzed)} lotes analizados):", ""]
+    for r in analyzed:
+        body_lines.append(
+            f"- #{r.auction.auction_id} {r.auction.lot_type or '?'}: retail "
+            f"{r.insights.total_retail:,.0f} EUR, efectivo "
+            f"{r.insights.effective_retail:,.0f} EUR, "
+            f"{len(r.insights.giveaways)} regalados — {r.auction.url}"
+        )
+    failed = [r for r in results if r.error]
+    if failed:
+        body_lines += ["", "Sin manifiesto:"]
+        body_lines += [f"- #{r.auction.auction_id}: {r.error}" for r in failed]
+
+    email = EmailNotifier(settings.email)
+    sent = email.send(
+        f"Pallets B-Stock — {len(analyzed)} lotes — {datetime.now():%d/%m %H:%M}",
+        "\n".join(body_lines),
+        attachments=[pdf_path],
+    )
+    print(f"Email enviado: {sent}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="liquidation_tracker",
@@ -252,6 +324,17 @@ def build_parser() -> argparse.ArgumentParser:
                              help="Try a live Amazon price check on doubtful giveaways")
     p_manifests.add_argument("--report-dir", default="data/reports")
     p_manifests.set_defaults(func=cmd_manifests)
+
+    p_watch = sub.add_parser(
+        "watch", help="Detect new auctions, build PDF reports, ping WhatsApp"
+    )
+    p_watch.set_defaults(func=cmd_watch)
+
+    p_digest = sub.add_parser(
+        "digest", help="Email a combined PDF report of all active lots"
+    )
+    p_digest.add_argument("--report-dir", default="data/reports")
+    p_digest.set_defaults(func=cmd_digest)
 
     return parser
 
