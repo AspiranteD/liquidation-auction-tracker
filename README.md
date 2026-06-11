@@ -129,18 +129,28 @@ Two channels, independently switchable in `.env`:
   `CALLMEBOT_APIKEY`, set `CALLMEBOT_PHONE` to your number in international
   format and `WHATSAPP_ALERTS_ENABLED=true`.
 
-An auction is considered *key* (and triggers one alert) when it passes every
-rule:
+Alerts are **reminders tied to the auction close**, evaluated with the bid as
+it stands at that moment (so run the monitor every ~5 minutes):
+
+- **T-30**: first reminder inside the last `REMINDER_WINDOW_MINUTES` (30) before
+  close, if the auction still qualifies.
+- **T-5 last call**: a second reminder inside the last
+  `FINAL_REMINDER_WINDOW_MINUTES` (5) when the lot is still a very good deal
+  (total landed cost ≤ `ALERT_VERY_GOOD_TOTAL_PCT`, default 10%).
+
+An auction qualifies when it passes every rule:
 
 | Rule | Env var | Default |
 |------|---------|---------|
 | Country in monitor list | `MONITOR_COUNTRIES` | `ES` |
-| Retail ≥ threshold | `ALERT_MIN_RETAIL` | `5000` |
-| Current bid still lands ≤ X% of retail | `ALERT_MAX_TOTAL_PCT` | `0.30` |
+| Lot family monitored, retail ≥ per-type minimum | `ALERT_MIN_RETAIL_4_PALLETS` / `_SMALL_TRUCKLOAD` / `_TRUCKLOAD` | `20000` / `50000` / `100000` |
+| Current bid still lands ≤ ceiling (of retail) | `ALERT_MAX_TOTAL_PCT`, or `ALERT_ELECTRONICS_MAX_TOTAL_PCT` when the title matches `ELECTRONICS_KEYWORDS` | `0.12` / `0.15` |
 | Pieces ≥ threshold | `ALERT_MIN_PIECES` | `0` |
 
-The suggested max bid in the alert is computed with `BID_TARGET_TOTAL_PCT`
-(default `0.25`). Alerts are de-duplicated: each auction is alerted at most once.
+The ceilings apply to the **total landed cost** (bid + transport + VAT + fee +
+RE) — a 12% total ceiling puts the bid itself around 5-10% of retail. The
+suggested max bid in each alert is computed against the applicable ceiling.
+Each reminder stage fires at most once per auction.
 
 ## Storage
 

@@ -32,7 +32,9 @@ CREATE TABLE IF NOT EXISTS auction (
     total_pct       REAL,
     first_seen      TEXT,
     last_seen       TEXT,
-    alerted         INTEGER DEFAULT 0
+    alerted         INTEGER DEFAULT 0,
+    alerted_t30     INTEGER DEFAULT 0,
+    alerted_t5      INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS bid_snapshot (
@@ -47,6 +49,15 @@ CREATE INDEX IF NOT EXISTS idx_auction_country ON auction (country);
 CREATE INDEX IF NOT EXISTS idx_snapshot_auction ON bid_snapshot (auction_id);
 """
 
+# Reminder stages: "t30" (~30 min before close) and "t5" (last call, ~5 min).
+ALERT_STAGES = ("t30", "t5")
+
+# Columns added after the initial release; applied to pre-existing databases.
+_MIGRATIONS = (
+    "ALTER TABLE auction ADD COLUMN alerted_t30 INTEGER DEFAULT 0",
+    "ALTER TABLE auction ADD COLUMN alerted_t5 INTEGER DEFAULT 0",
+)
+
 
 class Storage:
     def __init__(self, db_path: str = "data/auctions.db") -> None:
@@ -56,6 +67,11 @@ class Storage:
             os.makedirs(parent, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
+            for statement in _MIGRATIONS:
+                try:
+                    conn.execute(statement)
+                except sqlite3.OperationalError:
+                    pass  # column already exists
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -123,17 +139,26 @@ class Storage:
                 (auction.auction_id, auction.current_bid, now),
             )
 
-    def was_alerted(self, auction_id: int) -> bool:
+    @staticmethod
+    def _stage_column(stage: str) -> str:
+        if stage not in ALERT_STAGES:
+            raise ValueError(f"Unknown alert stage: {stage!r}")
+        return f"alerted_{stage}"
+
+    def was_alerted(self, auction_id: int, stage: str = "t30") -> bool:
+        column = self._stage_column(stage)
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT alerted FROM auction WHERE auction_id = ?", (auction_id,)
+                f"SELECT {column} FROM auction WHERE auction_id = ?", (auction_id,)
             ).fetchone()
-            return bool(row and row["alerted"])
+            return bool(row and row[column])
 
-    def mark_alerted(self, auction_id: int) -> None:
+    def mark_alerted(self, auction_id: int, stage: str = "t30") -> None:
+        column = self._stage_column(stage)
         with self._connect() as conn:
             conn.execute(
-                "UPDATE auction SET alerted = 1 WHERE auction_id = ?", (auction_id,)
+                f"UPDATE auction SET {column} = 1 WHERE auction_id = ?",
+                (auction_id,),
             )
 
     def all_auctions(self) -> List[sqlite3.Row]:

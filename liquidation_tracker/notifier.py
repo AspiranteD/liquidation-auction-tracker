@@ -76,36 +76,60 @@ class EmailNotifier:
             return False
 
     def send_auction_alert(
-        self, auction: Auction, decision: AlertDecision
+        self,
+        auction: Auction,
+        decision: AlertDecision,
+        stage: str = "t30",
+        minutes_left: Optional[float] = None,
     ) -> bool:
+        prefix = "[ULTIMA LLAMADA]" if stage == "t5" else "[Liquidation Alert]"
         subject = (
-            f"[Liquidation Alert] {auction.country} {auction.lot_type} - "
+            f"{prefix} {auction.country} {auction.lot_type} - "
             f"retail EUR {auction.retail_value:,.0f}"
             if auction.retail_value
-            else f"[Liquidation Alert] {auction.title[:60]}"
+            else f"{prefix} {auction.title[:60]}"
         )
-        return self.send(subject, build_alert_body(auction, decision))
+        body = build_alert_body(auction, decision)
+        if minutes_left is not None:
+            body = f"Closes in ~{minutes_left:.0f} minutes.\n\n{body}"
+        return self.send(subject, body)
 
 
-def build_whatsapp_body(auction: Auction, decision: AlertDecision) -> str:
+def build_whatsapp_body(
+    auction: Auction,
+    decision: AlertDecision,
+    stage: str = "t30",
+    minutes_left: Optional[float] = None,
+) -> str:
     """Compact, mobile-friendly version of the alert (WhatsApp message)."""
     b = decision.breakdown
     retail = f"EUR {auction.retail_value:,.0f}" if auction.retail_value else "n/a"
-    bid = f"EUR {auction.current_bid:,.0f}" if auction.current_bid else "n/a"
+    bid = f"EUR {auction.current_bid:,.0f}" if auction.current_bid else "sin puja"
+    mins = f"{minutes_left:.0f}" if minutes_left is not None else "?"
+
+    if stage == "t5":
+        header = f"🔥 ÚLTIMA LLAMADA: cierra en {mins} min"
+    else:
+        header = f"⏰ Cierra en {mins} min — B-Stock ({auction.country})"
+
     lines = [
-        f"🚨 Subasta clave B-Stock ({auction.country})",
+        header,
         f"{auction.lot_type or 'Lote'} — retail {retail}, {auction.pieces or '?'} uds",
-        f"Puja actual: {bid}",
     ]
+    if decision.current_total_pct is not None:
+        lines.append(
+            f"Puja actual: {bid} → coste total {decision.current_total_pct:.1%} del retail"
+        )
+    else:
+        lines.append(f"Puja actual: {bid}")
+    threshold_note = (
+        f"umbral {decision.threshold_pct:.0%}"
+        + (" (electrónica)" if decision.electronics else "")
+    )
     if b:
         lines.append(
-            f"Puja máx sugerida: EUR {b.bid:,.0f} "
-            f"(coste total EUR {b.total_cost:,.0f}"
-            + (
-                f", {b.total_pct_of_retail:.0%} del retail)"
-                if b.total_pct_of_retail is not None
-                else ")"
-            )
+            f"Puja máx para {threshold_note}: EUR {b.bid:,.0f} "
+            f"(coste total EUR {b.total_cost:,.0f})"
         )
     if auction.end_time:
         lines.append(f"Cierra: {auction.end_time:%d/%m %H:%M}")
@@ -157,5 +181,11 @@ class WhatsAppNotifier:
         logger.info("WhatsApp alert sent to %s", cfg.phone)
         return True
 
-    def send_auction_alert(self, auction: Auction, decision: AlertDecision) -> bool:
-        return self.send(build_whatsapp_body(auction, decision))
+    def send_auction_alert(
+        self,
+        auction: Auction,
+        decision: AlertDecision,
+        stage: str = "t30",
+        minutes_left: Optional[float] = None,
+    ) -> bool:
+        return self.send(build_whatsapp_body(auction, decision, stage, minutes_left))

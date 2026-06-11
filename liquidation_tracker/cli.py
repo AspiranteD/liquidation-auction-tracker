@@ -129,7 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_list = sub.add_parser("list", help="List active auctions for a country")
     p_list.add_argument("--country", default="ES")
     p_list.add_argument("--limit", type=int, default=48)
-    p_list.add_argument("--pct", type=float, default=0.25,
+    p_list.add_argument("--pct", type=float, default=0.12,
                         help="Target landed cost as fraction of retail")
     p_list.set_defaults(func=cmd_list)
 

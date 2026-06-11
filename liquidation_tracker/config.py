@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 try:
     from dotenv import load_dotenv
@@ -83,20 +83,75 @@ class WhatsAppConfig:
 
 @dataclass
 class AlertRules:
-    """Thresholds that decide whether an auction is 'key' and worth an email."""
+    """Thresholds that decide whether an auction is 'key' and worth an alert.
 
-    min_retail_value: float = 5000.0
-    max_total_cost_pct: float = 0.30   # only alert if you can land it <= 30% of retail
-    target_total_pct: float = 0.25     # the % used to compute the suggested max bid
+    The percentage ceilings apply to the TOTAL landed cost (bid + transport +
+    VAT + B-Stock fee + RE) as a fraction of retail — the bid itself typically
+    ends up around 5-10% of retail when the total lands at 12%.
+    """
+
+    max_total_cost_pct: float = 0.12               # ceiling for any lot
+    electronics_max_total_pct: float = 0.15        # ceiling when the lot has electronics
+    very_good_total_pct: float = 0.10              # <= this triggers the last-call reminder
+
+    # Minimum retail value (EUR) per lot family. Families not listed here are
+    # never alerted.
+    min_retail_by_type: Dict[str, float] = field(
+        default_factory=lambda: {
+            "4 Pallets": 20000.0,
+            "Small Truckload": 50000.0,
+            "Truckload": 100000.0,
+        }
+    )
+
+    # Title keywords that mark a lot as electronics (iPhones, Macs, lenses...).
+    electronics_keywords: List[str] = field(
+        default_factory=lambda: [
+            "Wireless",
+            "PC Goods",
+            "Camera",
+            "Computers",
+            "Electronics",
+            "Home Entertainment",
+        ]
+    )
+
+    # Alerts fire as reminders before close, not when the auction appears.
+    reminder_window_min: int = 30        # first reminder: <= 30 min to close
+    final_reminder_window_min: int = 5   # last call: <= 5 min to close and very good
+
     countries: List[str] = field(default_factory=lambda: ["ES"])
     min_pieces: int = 0
 
     @classmethod
     def from_env(cls) -> "AlertRules":
+        defaults = cls()
         return cls(
-            min_retail_value=_get_float("ALERT_MIN_RETAIL", 5000.0),
-            max_total_cost_pct=_get_float("ALERT_MAX_TOTAL_PCT", 0.30),
-            target_total_pct=_get_float("BID_TARGET_TOTAL_PCT", 0.25),
+            max_total_cost_pct=_get_float(
+                "ALERT_MAX_TOTAL_PCT", defaults.max_total_cost_pct
+            ),
+            electronics_max_total_pct=_get_float(
+                "ALERT_ELECTRONICS_MAX_TOTAL_PCT", defaults.electronics_max_total_pct
+            ),
+            very_good_total_pct=_get_float(
+                "ALERT_VERY_GOOD_TOTAL_PCT", defaults.very_good_total_pct
+            ),
+            min_retail_by_type={
+                "4 Pallets": _get_float("ALERT_MIN_RETAIL_4_PALLETS", 20000.0),
+                "Small Truckload": _get_float(
+                    "ALERT_MIN_RETAIL_SMALL_TRUCKLOAD", 50000.0
+                ),
+                "Truckload": _get_float("ALERT_MIN_RETAIL_TRUCKLOAD", 100000.0),
+            },
+            electronics_keywords=_get_list(
+                "ELECTRONICS_KEYWORDS", defaults.electronics_keywords
+            ),
+            reminder_window_min=_get_int(
+                "REMINDER_WINDOW_MINUTES", defaults.reminder_window_min
+            ),
+            final_reminder_window_min=_get_int(
+                "FINAL_REMINDER_WINDOW_MINUTES", defaults.final_reminder_window_min
+            ),
             countries=_get_list("MONITOR_COUNTRIES", ["ES"]),
             min_pieces=_get_int("ALERT_MIN_PIECES", 0),
         )

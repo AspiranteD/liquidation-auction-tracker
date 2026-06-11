@@ -25,20 +25,39 @@ def _auction() -> Auction:
 
 
 def _decision(auction: Auction) -> AlertDecision:
-    breakdown = BidCalculator().max_bid_for_retail_pct(
-        auction.retail_value, 0.25, auction.lot_type
+    calc = BidCalculator()
+    breakdown = calc.max_bid_for_retail_pct(
+        auction.retail_value, 0.12, auction.lot_type
     )
-    return AlertDecision(is_key=True, reasons=[], breakdown=breakdown)
+    current = calc.cost_breakdown_for_bid(
+        auction.current_bid or 0.0, auction.lot_type, retail_value=auction.retail_value
+    )
+    return AlertDecision(
+        is_key=True,
+        reasons=[],
+        breakdown=breakdown,
+        threshold_pct=0.12,
+        current_total_pct=current.total_pct_of_retail,
+    )
 
 
 def test_whatsapp_body_contains_key_facts():
     auction = _auction()
-    body = build_whatsapp_body(auction, _decision(auction))
+    body = build_whatsapp_body(auction, _decision(auction), "t30", 28.0)
+    assert "Cierra en 28 min" in body
     assert "ES" in body
     assert "Small Truckload" in body
     assert "16,404" in body
     assert auction.url in body
     assert "11/06" in body
+    assert "umbral 12%" in body
+
+
+def test_whatsapp_body_last_call():
+    auction = _auction()
+    body = build_whatsapp_body(auction, _decision(auction), "t5", 4.0)
+    assert "ÚLTIMA LLAMADA" in body
+    assert "cierra en 4 min" in body
 
 
 def test_whatsapp_disabled_does_not_send():
