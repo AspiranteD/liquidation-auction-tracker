@@ -136,6 +136,11 @@ _TV_PANEL_TECH_RE = re.compile(
     r"\b(?:oled|qled|nanocell|uled|4k|uhd|ultra\s?hd|led\s?tv)\b", re.IGNORECASE
 )
 _TV_CATEGORY_RE = re.compile(r"\btv|television", re.IGNORECASE)
+# A category can say "TV" and still be accessories ("TV Mounts & Stands"):
+# don't let it promote the line to a sure TV.
+_TV_CATEGORY_ACCESSORY_RE = re.compile(
+    r"accessor|mount|stand|soporte|bracket|cable|remote|mando", re.IGNORECASE
+)
 
 AMAZON_URL = "https://www.amazon.es/dp/{asin}"
 
@@ -300,7 +305,10 @@ def find_tvs(
         if _has_accessory_word(desc):
             continue  # TV stand / mount / remote / stick: not a panel
 
-        category_says_tv = bool(_TV_CATEGORY_RE.search(cat_text))
+        category_says_tv = bool(
+            _TV_CATEGORY_RE.search(cat_text)
+            and not _TV_CATEGORY_ACCESSORY_RE.search(cat_text)
+        )
         keyword = bool(_TV_KEYWORD_RE.search(desc))
         size = bool(_SCREEN_SIZE_RE.search(desc))
         panel_tech = bool(_TV_PANEL_TECH_RE.search(desc))
@@ -451,7 +459,7 @@ def verify_giveaway_prices(
 
 def analyze_containers(
     items: List[ManifestItem], rules: Optional[InsightRules] = None
-) -> tuple:
+) -> Tuple[List[ContainerStats], List[PalletStats]]:
     """Classify pallets and flag genuinely suspicious containers.
 
     Two pallet kinds behave completely differently:
@@ -621,10 +629,13 @@ def quick_read(insights: "ManifestInsights") -> List[str]:
     if insights.giveaways:
         declared = sum(g.item.line_retail for g in insights.giveaways)
         estimated = sum(g.estimated_value for g in insights.giveaways)
+        sure_n = sum(1 for g in insights.giveaways if g.tier == "seguro")
+        doubt_n = len(insights.giveaways) - sure_n
         bullets.append(
             f"🎁 {len(insights.giveaways)} objetos que podrían venderse por "
             f"~{estimated:,.0f} EUR están declarados por {declared:,.0f} EUR "
-            f"(pruebas con enlace en la tabla de regalados)."
+            f"({sure_n} seguros, {doubt_n} por verificar — pruebas con enlace "
+            f"en la tabla de regalados)."
         )
 
     if insights.suspicious_boxes:
@@ -651,7 +662,11 @@ def quick_read(insights: "ManifestInsights") -> List[str]:
     for pallet in insights.pallets:
         by_type[pallet.pallet_type] += 1
     if by_type:
-        parts = [f"{count} de {name}" for name, count in by_type.items()]
+        labels = {"cajas": "de cajas", "granel": "a granel",
+                  "objetos grandes": "de objetos grandes"}
+        parts = [
+            f"{count} {labels.get(name, name)}" for name, count in by_type.items()
+        ]
         bullets.append(
             f"🚚 Pallets: {', '.join(parts)}. En los de objetos grandes, "
             "pocas unidades es lo normal (no se marcan)."

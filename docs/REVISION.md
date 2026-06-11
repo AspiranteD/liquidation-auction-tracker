@@ -22,11 +22,18 @@ pasan tras cada cambio.
 | `alerts.py`, `calculator.py`, `config.py`, `analyzer.py`, `pipeline.py` | Revisados línea a línea: sin bugs encontrados en esta pasada | — | ✅ Limpios |
 | `examples/demo.py` | Revisado; funciona offline | — | ✅ Limpio |
 
-## Pendiente para la pasada 2
+## Pasada 2 — relectura profunda + cobertura de tests
 
-- Relectura desde disco de `insights.py` y `reports.py` completos (son los más
-  nuevos y largos).
-- Revisión de los tests en sí (cobertura de huecos: pipeline con ventanas
-  T-30/T-5, storage con migración sobre BD vieja).
-- Coherencia `.env.example` ↔ `config.py` ↔ README.
-- Scripts de `scripts/` y verificación de las 5 tareas programadas.
+| Archivo | Hallazgo | Gravedad | Estado |
+|---|---|---|---|
+| `insights.py` | Un accesorio caro en categoría "TV Mounts & Stands" sin palabra de accesorio en la descripción contaba como TV "seguro" (la exclusión solo miraba la descripción) | Media | ✅ Corregido + test |
+| `insights.py` | Anotación `-> tuple` sin parametrizar; redacción del quick-read ("3 de granel", titular de regalados sin distinguir seguros de dudosos) | Cosmética | ✅ Corregido |
+| `pipeline.py` | **La lógica de ventanas T-30/T-5 no tenía ni un test** (lo más crítico de cara al usuario) | Alta (riesgo) | ✅ 6 tests nuevos: dispara una vez en ventana, sin duplicados, nada fuera de ventana ni tras el cierre, última llamada solo si ≤10%, degradación a T-30 tardío, exclusión por umbral |
+| `storage.py` | La migración de BD antigua tampoco tenía test | Media (riesgo) | ✅ Test con esquema original real |
+| `scripts/` | `run_monitor_hidden.vbs` huérfano (sustituido por el genérico `run_hidden.vbs`; verificado que la tarea programada usa el nuevo) | Cosmética | ✅ Eliminado |
+| `README.md` | Ejemplo del CLI con `--pct 0.25` antiguo | Cosmética | ✅ Corregido |
+| `.env.example` ↔ `config.py` | Paridad verificada: todas las variables documentadas existen y con los mismos defaults | — | ✅ Coherente |
+| `reports.py` | Relectura completa tras el fix de `try/finally`; verificado en ejecución real (watch + digest funcionaron en vivo) | — | ✅ Limpio |
+
+**Estado final: 64 tests, 0 warnings, todos los módulos revisados al menos
+una vez línea a línea, los críticos dos veces.**

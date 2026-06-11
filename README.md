@@ -106,7 +106,7 @@ python examples/demo.py
 
 ```bash
 # Compute the max bid for a lot
-python -m liquidation_tracker.cli bid --retail 16670 --type "Small Truckload" --pct 0.25
+python -m liquidation_tracker.cli bid --retail 16670 --type "Small Truckload" --pct 0.12
 
 # List active auctions for a country, with suggested bids (live)
 python -m liquidation_tracker.cli list --country ES

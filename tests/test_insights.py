@@ -120,6 +120,21 @@ def test_real_tv_above_floor_is_sure():
     assert tvs[0].confidence == "seguro"
 
 
+def test_tv_accessory_category_not_sure_tv():
+    # An expensive wall mount categorized under "TV Mounts" must not count
+    # as a TV panel even with no accessory word in the description.
+    items = [
+        _item(
+            description="ECHOGEAR brazo articulado movimiento completo",
+            category="Electronics",
+            subcategory="TV Mounts & Stands",
+            unit_retail=120.0,
+        )
+    ]
+    tvs = insights.find_tvs(items)
+    assert not any(t.confidence == "seguro" for t in tvs)
+
+
 def test_same_asin_price_disparity_flags_cheap_line():
     items = [
         _item(description="Robot aspirador X", asin="B0DUPE", unit_retail=300.0),
