@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import List, Optional
@@ -99,7 +100,14 @@ def _new_pdf() -> tuple[FPDF, str]:
     return pdf, family
 
 
+_EMOJI_RE = re.compile(
+    "[\U0001F000-\U0001FAFF☀-➿⬀-⯿️]+\\s?"
+)
+
+
 def _safe(text: str, family: str) -> str:
+    # Arial has no emoji glyphs; the markdown/WhatsApp versions keep them.
+    text = _EMOJI_RE.sub("", text)
     if family != "helvetica":
         return text
     return text.encode("latin-1", errors="replace").decode("latin-1")
@@ -167,6 +175,11 @@ def _render_lot_into(
             _pdf_line(pdf, family, f"Cierra: {auction.end_time:%d/%m/%Y %H:%M} — {auction.url}")
         pdf.ln(2)
 
+    _pdf_heading(pdf, family, "Lectura rápida")
+    for bullet in insights.quick_read(result):
+        _pdf_line(pdf, family, f"• {bullet}")
+    pdf.ln(2)
+
     _pdf_heading(pdf, family, "Resumen")
     sure_g = sum(1 for g in result.giveaways if g.tier == "seguro")
     doubt_g = sum(1 for g in result.giveaways if g.tier == "dudoso")
@@ -181,10 +194,9 @@ def _render_lot_into(
         f"Regalados: {sure_g} seguros, {doubt_g} dudosos — "
         f"valor estimado regalado: {result.giveaway_value_sure:,.0f} EUR seguros "
         f"+ {result.giveaway_value_doubt:,.0f} EUR dudosos\n"
-        f"Cajas sospechosas: {len(result.suspicious_boxes)}/{len(result.boxes)}  ·  "
-        f"Pallets sospechosos: {len(result.suspicious_pallets)}/{len(result.pallets)}  ·  "
-        f"Valor potencial sin declarar en contenedores (orientativo): "
-        f"{result.container_hidden_value:,.0f} EUR",
+        f"Cajas demasiado vacías: {len(result.suspicious_boxes)}/{len(result.boxes)}  ·  "
+        f"Pallets con cajas de menos: "
+        f"{len(result.suspicious_pallets)}/{len(result.pallets)}",
     )
     pdf.ln(2)
 
@@ -247,17 +259,47 @@ def _render_lot_into(
         _pdf_line(pdf, family, "Sin regalados detectados.")
         pdf.ln(1)
 
-    _pdf_heading(pdf, family, "Cajas y pallets sospechosos")
-    flagged = result.suspicious_boxes + result.suspicious_pallets
-    if flagged:
+    _pdf_heading(pdf, family, "Cajas demasiado vacías (van siempre llenas a tope)")
+    if result.suspicious_boxes:
         _pdf_table(
             pdf, family,
-            ["Tipo", "ID", "Uds", "Retail EUR", "Motivo"],
-            [[c.kind, c.container_id, c.units, f"{c.retail:,.0f}", c.reason] for c in flagged],
-            [16, 30, 14, 28, 100],
+            ["Caja", "Objetos", "Retail EUR", "Motivo"],
+            [[b.container_id, b.units, f"{b.retail:,.0f}", b.reason]
+             for b in result.suspicious_boxes],
+            [30, 16, 24, 118],
+        )
+        _pdf_line(
+            pdf, family,
+            "El valor de una caja NO indica regalados (puede llevar cosas "
+            "baratas): solo cuenta el número de objetos declarados.",
+            size=8,
         )
     else:
-        _pdf_line(pdf, family, "Ningún contenedor sospechoso.")
+        _pdf_line(pdf, family, "Ninguna caja demasiado vacía.")
+        pdf.ln(1)
+
+    _pdf_heading(pdf, family, "Pallets (clasificados)")
+    if result.pallets:
+        _pdf_table(
+            pdf, family,
+            ["Pallet", "Tipo", "Cajas", "Objetos", "Retail EUR", "Peso med. kg", "Aviso"],
+            [[p.pallet_id, p.pallet_type,
+              str(p.box_count) if p.pallet_type == "cajas" else "-",
+              p.units, f"{p.retail:,.0f}",
+              f"{p.avg_weight_kg:.1f}" if p.avg_weight_kg is not None else "?",
+              p.reason]
+             for p in result.pallets],
+            [24, 26, 13, 16, 24, 20, 65],
+        )
+        _pdf_line(
+            pdf, family,
+            "cajas = ~6 cajas de Amazon apiladas. objetos grandes = artículos "
+            "voluminosos sueltos (pocas unidades es normal, no se marca). "
+            "granel = objetos medianos sueltos.",
+            size=8,
+        )
+    else:
+        _pdf_line(pdf, family, "Sin información de pallets.")
         pdf.ln(1)
 
     _pdf_heading(pdf, family, "Top 10 artículos por valor")
@@ -414,10 +456,14 @@ def build_whatsapp_lot_summary(report: LotReport) -> str:
                 f"  · {(g.item.description or '')[:40]} — {g.item.unit_retail:,.0f} EUR "
                 f"(vale ~{g.estimated_value:,.0f})"
             )
-    if r.suspicious_boxes or r.suspicious_pallets:
+    if r.suspicious_boxes:
         lines.append(
-            f"Sospechosos: {len(r.suspicious_boxes)}/{len(r.boxes)} cajas, "
-            f"{len(r.suspicious_pallets)}/{len(r.pallets)} pallets"
+            f"📦 {len(r.suspicious_boxes)} cajas demasiado vacías "
+            f"(puede haber regalados dentro)"
+        )
+    if r.suspicious_pallets:
+        lines.append(
+            f"🧱 {len(r.suspicious_pallets)} pallets con menos de 6 cajas declaradas"
         )
     if a.end_time:
         lines.append(f"Cierra: {a.end_time:%d/%m %H:%M}")

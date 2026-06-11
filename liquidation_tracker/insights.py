@@ -42,11 +42,20 @@ class InsightRules:
     giveaway_sure_fraction: float = 0.10
     giveaway_doubt_fraction: float = 0.40
 
-    # Containers: flag when units (or declared value) fall at or below this
-    # fraction of the lot's median container, or below the absolute floor.
-    container_sparse_fraction: float = 0.35
+    # Boxes travel full to the top, so the only reliable emptiness signal is
+    # the DECLARED UNIT COUNT (a cheap-but-full box is not suspicious). Flag
+    # a true box when its units fall at or below this fraction of the lot's
+    # median box, with an absolute floor.
+    box_sparse_fraction: float = 0.35
     box_min_units_abs: int = 4
-    pallet_min_units_abs: int = 15
+
+    # Amazon stacks this many boxes per "pallet de cajas"; fewer declared
+    # boxes may mean whole undeclared boxes.
+    expected_boxes_per_pallet: int = 6
+
+    # A single-package pallet whose items average at least this weight (kg)
+    # is a "pallet de objetos grandes": few units there is normal.
+    large_object_weight_kg: float = 15.0
 
     # A "sure" TV must be declared at least at this price; below it the line
     # is downgraded to "posible" (converters/dongles mention 4K too).
@@ -204,6 +213,27 @@ class ContainerStats:
 
 
 @dataclass
+class PalletStats:
+    """A physical pallet, classified by what it carries.
+
+    - "cajas": several Amazon boxes stacked (normally 6); many small items.
+    - "objetos grandes": loose bulky items (treadmills, furniture); 1-3
+      units is perfectly normal.
+    - "granel": loose medium items directly on the pallet.
+    """
+
+    pallet_id: str
+    pallet_type: str  # "cajas" | "granel" | "objetos grandes"
+    box_count: int = 0
+    lines: int = 0
+    units: int = 0
+    retail: float = 0.0
+    avg_weight_kg: Optional[float] = None
+    suspicious: bool = False
+    reason: str = ""
+
+
+@dataclass
 class ManifestInsights:
     label: str
     total_lines: int
@@ -221,11 +251,10 @@ class ManifestInsights:
     giveaways: List[GiveawayFinding]
     giveaway_value_sure: float        # hidden value in "seguro" findings
     giveaway_value_doubt: float       # hidden value in "dudoso" findings
-    boxes: List[ContainerStats]
-    pallets: List[ContainerStats]
+    boxes: List[ContainerStats]       # real boxes (from multi-box pallets)
+    pallets: List[PalletStats]        # every pallet, classified
     suspicious_boxes: List[ContainerStats]
-    suspicious_pallets: List[ContainerStats]
-    container_hidden_value: float     # speculative: sparse containers vs median
+    suspicious_pallets: List[PalletStats]  # box-pallets missing boxes
     top_items: List[ManifestItem]
     warnings: List[str] = field(default_factory=list)
 
@@ -420,54 +449,95 @@ def verify_giveaway_prices(
 # Box / pallet density
 # ---------------------------------------------------------------------------
 
-def container_analysis(
-    items: List[ManifestItem],
-    attr: str,
-    kind: str,
-    rules: Optional[InsightRules] = None,
-) -> List[ContainerStats]:
-    """Group items by physical container and flag suspiciously empty ones.
+def analyze_containers(
+    items: List[ManifestItem], rules: Optional[InsightRules] = None
+) -> tuple:
+    """Classify pallets and flag genuinely suspicious containers.
 
-    Amazon fills boxes and pallets to the top: a container with far fewer
-    declared units (or value) than its siblings means undeclared content.
+    Two pallet kinds behave completely differently:
+
+    - A "pallet de cajas" stacks several Amazon boxes (normally 6). Each box
+      travels FULL, so a box declaring very few units hides content. A box
+      full of cheap items is NOT suspicious — value is never a criterion.
+    - A pallet with a single package is loose content: "objetos grandes"
+      (heavy items, 1-3 units is normal) or "granel" (medium items). Their
+      unit counts vary legitimately, so they are never flagged.
+
+    Returns ``(boxes, pallets)``: real boxes (from multi-box pallets only)
+    and every pallet with its classification.
     """
     rules = rules or InsightRules()
-    containers: Dict[str, ContainerStats] = {}
+
+    by_pallet: Dict[str, List[ManifestItem]] = defaultdict(list)
     for item in items:
-        cid = getattr(item, attr) or None
-        if not cid:
-            continue
-        stats = containers.setdefault(cid, ContainerStats(container_id=cid, kind=kind))
-        stats.lines += 1
-        stats.units += item.qty
-        stats.retail += item.line_retail
+        if item.pallet_id:
+            by_pallet[item.pallet_id].append(item)
 
-    result = sorted(containers.values(), key=lambda c: c.units)
-    if len(result) < 2:
-        return result  # nothing to compare against
+    boxes: List[ContainerStats] = []
+    pallets: List[PalletStats] = []
 
-    median_units = statistics.median(c.units for c in result)
-    median_retail = statistics.median(c.retail for c in result)
-    min_abs = rules.box_min_units_abs if kind == "caja" else rules.pallet_min_units_abs
+    for pallet_id, p_items in by_pallet.items():
+        box_ids = sorted({i.box_id for i in p_items if i.box_id})
+        weights = [i.weight_kg for i in p_items if i.weight_kg]
+        avg_weight = sum(weights) / len(weights) if weights else None
 
-    for stats in result:
-        reasons = []
-        sparse_floor = max(min_abs, median_units * rules.container_sparse_fraction)
-        if stats.units <= sparse_floor and stats.units < median_units:
-            reasons.append(
-                f"{stats.units} uds declaradas vs mediana {median_units:.0f} "
-                f"-> probable contenido sin declarar"
-            )
-        if median_retail > 0 and stats.retail <= median_retail * rules.container_sparse_fraction:
-            reasons.append(
-                f"valor declarado {stats.retail:.0f} EUR vs mediana "
-                f"{median_retail:.0f} EUR"
-            )
-        if reasons:
-            stats.suspicious = True
-            stats.reason = "; ".join(reasons)
-        stats.retail = round(stats.retail, 2)
-    return result
+        if len(box_ids) >= 2:
+            pallet_type = "cajas"
+        elif avg_weight is not None and avg_weight >= rules.large_object_weight_kg:
+            pallet_type = "objetos grandes"
+        else:
+            pallet_type = "granel"
+
+        pallet = PalletStats(
+            pallet_id=pallet_id,
+            pallet_type=pallet_type,
+            box_count=len(box_ids) if pallet_type == "cajas" else 0,
+            lines=len(p_items),
+            units=sum(i.qty for i in p_items),
+            retail=round(sum(i.line_retail for i in p_items), 2),
+            avg_weight_kg=round(avg_weight, 1) if avg_weight is not None else None,
+        )
+
+        if pallet_type == "cajas":
+            missing = rules.expected_boxes_per_pallet - len(box_ids)
+            if missing > 0:
+                pallet.suspicious = True
+                pallet.reason = (
+                    f"solo {len(box_ids)} de {rules.expected_boxes_per_pallet} cajas "
+                    f"declaradas (lo habitual es un pallet con "
+                    f"{rules.expected_boxes_per_pallet} cajas apiladas): puede haber "
+                    f"{missing} caja(s) enteras sin declarar"
+                )
+            for box_id in box_ids:
+                b_items = [i for i in p_items if i.box_id == box_id]
+                boxes.append(
+                    ContainerStats(
+                        container_id=box_id,
+                        kind="caja",
+                        lines=len(b_items),
+                        units=sum(i.qty for i in b_items),
+                        retail=round(sum(i.line_retail for i in b_items), 2),
+                    )
+                )
+        pallets.append(pallet)
+
+    # Flag sparse boxes by UNIT COUNT only (boxes always travel full).
+    if len(boxes) >= 2:
+        median_units = statistics.median(b.units for b in boxes)
+        floor = max(rules.box_min_units_abs, median_units * rules.box_sparse_fraction)
+        for box in boxes:
+            if box.units <= floor and box.units < median_units:
+                box.suspicious = True
+                box.reason = (
+                    f"{box.units} objetos declarados; lo normal en este lote es "
+                    f"~{median_units:.0f} por caja. Las cajas van llenas a tope: "
+                    f"puede haber regalados dentro"
+                )
+
+    boxes.sort(key=lambda b: b.units)
+    type_order = {"cajas": 0, "granel": 1, "objetos grandes": 2}
+    pallets.sort(key=lambda p: (type_order.get(p.pallet_type, 3), p.units))
+    return boxes, pallets
 
 
 # ---------------------------------------------------------------------------
@@ -496,19 +566,7 @@ def deep_analyze(
     if verify_prices and any(g.tier == "dudoso" for g in giveaways):
         verify_giveaway_prices(giveaways)
 
-    boxes = container_analysis(items, "box_id", "caja", rules)
-    pallets = container_analysis(items, "pallet_id", "pallet", rules)
-
-    # Speculative hidden value: how much declared value the sparse containers
-    # are missing versus the lot's median container. Boxes are preferred over
-    # pallets to avoid double counting (a pallet aggregates its boxes).
-    reference = boxes if boxes else pallets
-    container_hidden = 0.0
-    if len(reference) >= 2:
-        median_retail = statistics.median(c.retail for c in reference)
-        container_hidden = sum(
-            max(0.0, median_retail - c.retail) for c in reference if c.suspicious
-        )
+    boxes, pallets = analyze_containers(items, rules)
 
     if not any(i.box_id for i in items):
         warnings.append("El manifiesto no trae columna de caja (PkgID): sin análisis por caja.")
@@ -547,10 +605,64 @@ def deep_analyze(
         pallets=pallets,
         suspicious_boxes=[b for b in boxes if b.suspicious],
         suspicious_pallets=[p for p in pallets if p.suspicious],
-        container_hidden_value=round(container_hidden, 2),
         top_items=top_items,
         warnings=warnings,
     )
+
+
+def quick_read(insights: "ManifestInsights") -> List[str]:
+    """Plain-language conclusions with concrete figures, for humans.
+
+    E.g. "4 objetos que podrían venderse por ~750 EUR están declarados por
+    186 EUR" / "3 cajas van demasiado vacías: puede haber regalados dentro".
+    """
+    bullets: List[str] = []
+
+    if insights.giveaways:
+        declared = sum(g.item.line_retail for g in insights.giveaways)
+        estimated = sum(g.estimated_value for g in insights.giveaways)
+        bullets.append(
+            f"🎁 {len(insights.giveaways)} objetos que podrían venderse por "
+            f"~{estimated:,.0f} EUR están declarados por {declared:,.0f} EUR "
+            f"(pruebas con enlace en la tabla de regalados)."
+        )
+
+    if insights.suspicious_boxes:
+        ids = ", ".join(b.container_id for b in insights.suspicious_boxes[:5])
+        bullets.append(
+            f"📦 {len(insights.suspicious_boxes)} cajas van demasiado vacías "
+            f"(las llenan siempre a tope): puede haber regalados dentro — {ids}."
+        )
+
+    if insights.suspicious_pallets:
+        ids = ", ".join(p.pallet_id for p in insights.suspicious_pallets[:5])
+        bullets.append(
+            f"🧱 {len(insights.suspicious_pallets)} pallets de cajas con menos "
+            f"de 6 cajas declaradas: puede haber cajas enteras sin declarar — {ids}."
+        )
+
+    if insights.tv_units:
+        bullets.append(
+            f"📺 {insights.tv_units} TVs = pérdida de "
+            f"{insights.tv_loss_retail:,.0f} EUR (los paneles llegan rotos)."
+        )
+
+    by_type: Dict[str, int] = defaultdict(int)
+    for pallet in insights.pallets:
+        by_type[pallet.pallet_type] += 1
+    if by_type:
+        parts = [f"{count} de {name}" for name, count in by_type.items()]
+        bullets.append(
+            f"🚚 Pallets: {', '.join(parts)}. En los de objetos grandes, "
+            "pocas unidades es lo normal (no se marcan)."
+        )
+
+    bullets.append(
+        f"✅ Retail efectivo para calcular la puja: "
+        f"{insights.effective_retail:,.0f} EUR "
+        f"(de {insights.total_retail:,.0f} EUR declarados)."
+    )
+    return bullets
 
 
 # ---------------------------------------------------------------------------
@@ -580,6 +692,10 @@ def render_report(insights: ManifestInsights) -> str:
     """Render a ManifestInsights as a markdown report."""
     out: List[str] = [f"# Análisis de manifiesto — {insights.label}", ""]
 
+    out += ["## Lectura rápida", ""]
+    out += [f"- {bullet}" for bullet in quick_read(insights)]
+    out += [""]
+
     out += [
         "## Resumen",
         "",
@@ -593,10 +709,8 @@ def render_report(insights: ManifestInsights) -> str:
         f"{len([g for g in insights.giveaways if g.tier == 'dudoso'])} dudosos**",
         f"- **Valor estimado regalado: {insights.giveaway_value_sure:,.2f} EUR seguros "
         f"+ {insights.giveaway_value_doubt:,.2f} EUR dudosos** (pruebas en la sección de regalados)",
-        f"- Cajas: {len(insights.boxes)} ({len(insights.suspicious_boxes)} sospechosas) · "
-        f"Pallets: {len(insights.pallets)} ({len(insights.suspicious_pallets)} sospechosos)",
-        f"- Valor potencialmente sin declarar en contenedores escasos (orientativo): "
-        f"{insights.container_hidden_value:,.2f} EUR",
+        f"- Cajas reales: {len(insights.boxes)} ({len(insights.suspicious_boxes)} demasiado vacías) · "
+        f"Pallets: {len(insights.pallets)} ({len(insights.suspicious_pallets)} con cajas de menos)",
         "",
     ]
 
@@ -669,28 +783,42 @@ def render_report(insights: ManifestInsights) -> str:
     else:
         out.append("Sin regalados detectados con las reglas actuales.")
 
-    out += ["", "## Densidad por caja (las llenan a tope: poca cosa = sorpresa dentro)", ""]
+    out += ["", "## Cajas (solo las de pallets de cajas: van siempre llenas a tope)", ""]
     if insights.boxes:
         out += _table(
-            ["Caja", "Líneas", "Uds", "Retail EUR", "Sospechosa"],
+            ["Caja", "Objetos", "Retail EUR", "¿Demasiado vacía?"],
             [
-                [b.container_id[:20], str(b.lines), str(b.units), f"{b.retail:,.0f}",
-                 ("🚩 " + b.reason) if b.suspicious else ""]
+                [b.container_id[:20], str(b.units), f"{b.retail:,.0f}",
+                 ("🚩 " + b.reason) if b.suspicious else "no"]
                 for b in insights.boxes
             ],
         )
+        out.append("")
+        out.append(
+            "> El valor de una caja NO indica regalados (puede llevar cosas "
+            "baratas): solo cuenta el número de objetos declarados."
+        )
     else:
-        out.append("Sin información de cajas en este manifiesto.")
+        out.append("Este lote no tiene pallets de cajas.")
 
-    out += ["", "## Densidad por pallet", ""]
+    out += ["", "## Pallets (clasificados)", ""]
     if insights.pallets:
         out += _table(
-            ["Pallet", "Líneas", "Uds", "Retail EUR", "Sospechoso"],
+            ["Pallet", "Tipo", "Cajas", "Objetos", "Retail EUR", "Peso medio kg", "Aviso"],
             [
-                [p.container_id[:20], str(p.lines), str(p.units), f"{p.retail:,.0f}",
+                [p.pallet_id[:20], p.pallet_type,
+                 str(p.box_count) if p.pallet_type == "cajas" else "-",
+                 str(p.units), f"{p.retail:,.0f}",
+                 f"{p.avg_weight_kg:.1f}" if p.avg_weight_kg is not None else "?",
                  ("🚩 " + p.reason) if p.suspicious else ""]
                 for p in insights.pallets
             ],
+        )
+        out.append("")
+        out.append(
+            "> *cajas* = ~6 cajas de Amazon apiladas (muchos objetos pequeños). "
+            "*objetos grandes* = artículos voluminosos sueltos: pocas unidades "
+            "es lo normal y no se marca. *granel* = objetos medianos sueltos."
         )
     else:
         out.append("Sin información de pallets en este manifiesto.")

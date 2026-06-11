@@ -133,24 +133,81 @@ def test_same_asin_price_disparity_flags_cheap_line():
 
 # --- Containers ---------------------------------------------------------
 
-def test_sparse_box_flagged():
+def _box_pallet(pallet_id: str, box_units: dict, weight: float = 1.0):
+    """Build a pallet whose boxes carry the given units each."""
     items = []
-    # Five normal boxes with 40 units each...
-    for box in range(5):
-        for n in range(40):
-            items.append(_item(box_id=f"BOX{box}", description=f"item {box}-{n}"))
-    # ...and one box with only 2 declared units.
-    items += [_item(box_id="BOXSPARSE"), _item(box_id="BOXSPARSE")]
+    for box_id, units in box_units.items():
+        for n in range(units):
+            items.append(
+                _item(
+                    pallet_id=pallet_id,
+                    box_id=box_id,
+                    description=f"item {box_id}-{n}",
+                    weight_kg=weight,
+                )
+            )
+    return items
 
-    boxes = insights.container_analysis(items, "box_id", "caja")
+
+def test_sparse_box_in_box_pallet_flagged():
+    # Six boxes: five with 40 units, one with only 2 -> only that one flags.
+    units = {f"B{n}": 40 for n in range(5)}
+    units["BSPARSE"] = 2
+    boxes, pallets = insights.analyze_containers(_box_pallet("P1", units))
     flagged = [b for b in boxes if b.suspicious]
-    assert [b.container_id for b in flagged] == ["BOXSPARSE"]
+    assert [b.container_id for b in flagged] == ["BSPARSE"]
+    assert "regalados dentro" in flagged[0].reason
+    # 6 of 6 boxes declared -> the pallet itself is fine.
+    assert pallets[0].pallet_type == "cajas"
+    assert pallets[0].suspicious is False
 
 
-def test_single_container_never_flagged():
-    items = [_item(box_id="ONLY"), _item(box_id="ONLY")]
-    boxes = insights.container_analysis(items, "box_id", "caja")
-    assert not any(b.suspicious for b in boxes)
+def test_box_pallet_with_missing_boxes_flagged():
+    boxes, pallets = insights.analyze_containers(
+        _box_pallet("P1", {"B1": 40, "B2": 38, "B3": 41})
+    )
+    assert pallets[0].pallet_type == "cajas"
+    assert pallets[0].suspicious is True
+    assert "3 de 6" in pallets[0].reason
+
+
+def test_large_object_pallet_never_flagged_for_few_units():
+    # Two treadmills of 60 kg on one pallet: completely normal.
+    items = [
+        _item(pallet_id="PXL", box_id="PKG1", description="Cinta de correr",
+              weight_kg=60.0),
+        _item(pallet_id="PXL", box_id="PKG1", description="Cinta de correr",
+              weight_kg=62.0),
+    ]
+    boxes, pallets = insights.analyze_containers(items)
+    assert pallets[0].pallet_type == "objetos grandes"
+    assert pallets[0].suspicious is False
+    assert boxes == []  # a single package is not a real box
+
+
+def test_loose_medium_pallet_is_granel():
+    items = [
+        _item(pallet_id="PG", box_id="PKG1", description=f"silla {n}", weight_kg=6.0)
+        for n in range(20)
+    ]
+    _, pallets = insights.analyze_containers(items)
+    assert pallets[0].pallet_type == "granel"
+    assert pallets[0].suspicious is False
+
+
+def test_cheap_but_full_box_not_flagged():
+    # A box full of cheap items is NOT suspicious: value is never a criterion.
+    units = {f"B{n}": 40 for n in range(5)}
+    items = _box_pallet("P1", units)
+    items.append(_item(pallet_id="P1", box_id="BCHEAP", description="barato 0"))
+    for n in range(39):
+        items.append(
+            _item(pallet_id="P1", box_id="BCHEAP", description=f"barato {n+1}",
+                  unit_retail=0.5)
+        )
+    boxes, _ = insights.analyze_containers(items)
+    cheap = next(b for b in boxes if b.container_id == "BCHEAP")
+    assert cheap.suspicious is False
 
 
 # --- Breakdown / report -------------------------------------------------

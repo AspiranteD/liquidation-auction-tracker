@@ -14,20 +14,25 @@ Los `ESBX*` bajan sin login.
 **Pregunta:** ¿tienes cuenta de B-Stock? Si me pasas las cookies de sesión (o
 usuario/contraseña) añado login al cliente y cubrimos el 100%.
 
-## 2. Umbrales de "caja/pallet sospechoso" (calibrados con 5 manifiestos)
+## 2. Contenedores: modelo actual (revisado 11/06 noche)
 
-Regla actual: contenedor sospechoso si sus unidades ≤ 35% de la mediana del
-lote (con suelo absoluto: 4 uds caja, 15 uds pallet), o si su valor declarado
-≤ 35% de la mediana. En los lotes reales esto marca 1-5 cajas por lote.
+Cada pallet se clasifica por su contenido real:
 
-- Las cajas reales llevan 12-61 uds; tu ejemplo de "caja con 2 productos"
-  saltaría clarísimo.
-- También se marca la caja con valor anómalamente bajo aunque tenga unidades
-  normales (ej. caja spNVKDLPNPY del lote 51546: 47 uds pero 1.564 € vs
-  mediana 8.411 €) — ahí es donde suelen esconderse los regalados.
+- **Pallet de cajas** (≥2 PkgIDs distintos): ~6 cajas de Amazon apiladas con
+  objetos pequeños (0,4-2 kg de media en los lotes reales). Dos chequeos:
+  - *Caja demasiado vacía*: una caja con muchos menos objetos que la mediana
+    de cajas del lote (≤35%, suelo 4) → "puede haber regalados dentro". El
+    **valor NO cuenta**: una caja llena de cosas baratas es normal.
+  - *Pallet con cajas de menos*: menos de 6 cajas declaradas → "puede haber
+    cajas enteras sin declarar".
+- **Pallet de objetos grandes** (1 PkgID, peso medio ≥15 kg): cintas de
+  correr, muebles... 1-3 unidades es lo normal → **nunca se marca**.
+- **Pallet a granel** (1 PkgID, objetos medianos): conteos variables
+  legítimos → tampoco se marca.
 
-**Pregunta:** ¿35% te parece bien o lo quieres más/menos sensible? Se cambia
-en `InsightRules` ([insights.py](../liquidation_tracker/insights.py)).
+**Preguntas:** (a) el corte de "objeto grande" está en 15 kg de peso medio —
+¿te cuadra?; (b) marco los pallets con 5 de 6 cajas (sale a menudo: ¿falta
+una caja de verdad o a veces apilan 5?); ¿lo dejo solo para ≤4?
 
 ## 3. Lista de productos premium y sus precios "típicos"
 
