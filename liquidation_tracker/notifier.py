@@ -1,4 +1,4 @@
-"""Email notifications for key auctions (SMTP, e.g. Gmail app password)."""
+"""Alert notifications for key auctions: email (SMTP) and WhatsApp (CallMeBot)."""
 from __future__ import annotations
 
 import logging
@@ -6,8 +6,10 @@ import smtplib
 from email.message import EmailMessage
 from typing import Optional
 
+import requests
+
 from .alerts import AlertDecision
-from .config import EmailConfig
+from .config import EmailConfig, WhatsAppConfig
 from .models import Auction
 
 logger = logging.getLogger(__name__)
@@ -83,3 +85,77 @@ class EmailNotifier:
             else f"[Liquidation Alert] {auction.title[:60]}"
         )
         return self.send(subject, build_alert_body(auction, decision))
+
+
+def build_whatsapp_body(auction: Auction, decision: AlertDecision) -> str:
+    """Compact, mobile-friendly version of the alert (WhatsApp message)."""
+    b = decision.breakdown
+    retail = f"EUR {auction.retail_value:,.0f}" if auction.retail_value else "n/a"
+    bid = f"EUR {auction.current_bid:,.0f}" if auction.current_bid else "n/a"
+    lines = [
+        f"🚨 Subasta clave B-Stock ({auction.country})",
+        f"{auction.lot_type or 'Lote'} — retail {retail}, {auction.pieces or '?'} uds",
+        f"Puja actual: {bid}",
+    ]
+    if b:
+        lines.append(
+            f"Puja máx sugerida: EUR {b.bid:,.0f} "
+            f"(coste total EUR {b.total_cost:,.0f}"
+            + (
+                f", {b.total_pct_of_retail:.0%} del retail)"
+                if b.total_pct_of_retail is not None
+                else ")"
+            )
+        )
+    if auction.end_time:
+        lines.append(f"Cierra: {auction.end_time:%d/%m %H:%M}")
+    lines.append(auction.url)
+    return "\n".join(lines)
+
+
+class WhatsAppNotifier:
+    """Sends WhatsApp messages through the free CallMeBot API.
+
+    Requires a one-time setup: add CallMeBot's number on WhatsApp and send
+    "I allow callmebot to send me messages" to receive your apikey.
+    """
+
+    API_URL = "https://api.callmebot.com/whatsapp.php"
+
+    def __init__(self, config: WhatsAppConfig, timeout: int = 60) -> None:
+        self.config = config
+        self.timeout = timeout
+
+    def send(self, text: str) -> bool:
+        cfg = self.config
+        if not cfg.enabled:
+            logger.info("WhatsApp alerts disabled; skipping send.")
+            return False
+        if not (cfg.phone and cfg.apikey):
+            logger.warning("WhatsApp config incomplete; cannot send alert.")
+            return False
+
+        try:
+            response = requests.get(
+                self.API_URL,
+                params={"phone": cfg.phone, "text": text, "apikey": cfg.apikey},
+                timeout=self.timeout,
+            )
+        except requests.RequestException as exc:
+            logger.error("Failed to send WhatsApp alert: %s", exc)
+            return False
+
+        # CallMeBot answers 200 even for some errors, so check the body too.
+        body = response.text or ""
+        if response.status_code >= 400 or "APIKey is invalid" in body:
+            logger.error(
+                "CallMeBot rejected the message (HTTP %s): %s",
+                response.status_code,
+                body[:200],
+            )
+            return False
+        logger.info("WhatsApp alert sent to %s", cfg.phone)
+        return True
+
+    def send_auction_alert(self, auction: Auction, decision: AlertDecision) -> bool:
+        return self.send(build_whatsapp_body(auction, decision))

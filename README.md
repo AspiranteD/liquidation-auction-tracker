@@ -2,8 +2,8 @@
 
 A self-contained pipeline that monitors **Amazon EU liquidation auctions** on
 [B-Stock](https://bstock.com/amazoneu/), downloads the lot manifests, runs a
-profitability analysis and emails you when an auction matches your buying
-criteria.
+profitability analysis and alerts you by email and/or WhatsApp when an auction
+matches your buying criteria.
 
 Built from a real problem: B-Stock liquidation truckloads close fast, the
 headline bid hides the true landed cost (transport, VAT, marketplace fee, the
@@ -118,10 +118,19 @@ python -m liquidation_tracker.cli analyze data/sample_manifest.csv
 python -m liquidation_tracker.cli monitor --country ES
 ```
 
-## Email alerts
+## Alerts (email + WhatsApp)
 
-Set the SMTP variables in `.env` and `EMAIL_ALERTS_ENABLED=true`. An auction is
-considered *key* (and triggers one email) when it passes every rule:
+Two channels, independently switchable in `.env`:
+
+- **Email**: set the SMTP variables and `EMAIL_ALERTS_ENABLED=true`.
+- **WhatsApp** (via the free [CallMeBot](https://www.callmebot.com/blog/free-api-whatsapp-messages/)
+  API): add the CallMeBot number on WhatsApp, send it
+  `I allow callmebot to send me messages`, copy the apikey it replies with into
+  `CALLMEBOT_APIKEY`, set `CALLMEBOT_PHONE` to your number in international
+  format and `WHATSAPP_ALERTS_ENABLED=true`.
+
+An auction is considered *key* (and triggers one alert) when it passes every
+rule:
 
 | Rule | Env var | Default |
 |------|---------|---------|
@@ -130,8 +139,8 @@ considered *key* (and triggers one email) when it passes every rule:
 | Current bid still lands ≤ X% of retail | `ALERT_MAX_TOTAL_PCT` | `0.30` |
 | Pieces ≥ threshold | `ALERT_MIN_PIECES` | `0` |
 
-The suggested max bid in the email is computed with `BID_TARGET_TOTAL_PCT`
-(default `0.25`). Alerts are de-duplicated: each auction is emailed at most once.
+The suggested max bid in the alert is computed with `BID_TARGET_TOTAL_PCT`
+(default `0.25`). Alerts are de-duplicated: each auction is alerted at most once.
 
 ## Storage
 
@@ -159,7 +168,7 @@ liquidation_tracker/
 ├── calculator.py   # the bid calculator (landed-cost model)
 ├── analyzer.py     # manifest CSV -> aggregate stats
 ├── alerts.py       # rule engine: is this auction key?
-├── notifier.py     # SMTP email alerts
+├── notifier.py     # email (SMTP) + WhatsApp (CallMeBot) alerts
 ├── storage.py      # SQLite persistence + bid history
 ├── config.py       # env-driven settings
 ├── pipeline.py     # orchestration

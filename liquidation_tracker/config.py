@@ -65,6 +65,23 @@ class EmailConfig:
 
 
 @dataclass
+class WhatsAppConfig:
+    """CallMeBot WhatsApp alerts (https://www.callmebot.com/blog/free-api-whatsapp-messages/)."""
+
+    enabled: bool = False
+    phone: Optional[str] = None    # international format, e.g. +34600111222
+    apikey: Optional[str] = None   # the key CallMeBot sends you on WhatsApp
+
+    @classmethod
+    def from_env(cls) -> "WhatsAppConfig":
+        return cls(
+            enabled=os.getenv("WHATSAPP_ALERTS_ENABLED", "false").lower() == "true",
+            phone=os.getenv("CALLMEBOT_PHONE"),
+            apikey=os.getenv("CALLMEBOT_APIKEY"),
+        )
+
+
+@dataclass
 class AlertRules:
     """Thresholds that decide whether an auction is 'key' and worth an email."""
 
@@ -91,6 +108,7 @@ class Settings:
     manifest_dir: str = "data/manifests"
     countries: List[str] = field(default_factory=lambda: ["ES"])
     email: EmailConfig = field(default_factory=EmailConfig)
+    whatsapp: WhatsAppConfig = field(default_factory=WhatsAppConfig)
     rules: AlertRules = field(default_factory=AlertRules)
 
     @classmethod
@@ -101,5 +119,6 @@ class Settings:
             manifest_dir=os.getenv("MANIFEST_DIR", "data/manifests"),
             countries=rules.countries,
             email=EmailConfig.from_env(),
+            whatsapp=WhatsAppConfig.from_env(),
             rules=rules,
         )

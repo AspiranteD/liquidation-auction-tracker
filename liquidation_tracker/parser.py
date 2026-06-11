@@ -18,8 +18,11 @@ SITE = "amazoneu"
 
 _RETAIL_RE = re.compile(r"Total Retail\s*€([\d.,]+)")
 _PIECES_RE = re.compile(r"([\d.,]+)\s+Pieces", re.IGNORECASE)
+# The country suffix ("4 Pallets DE") must stay case-sensitive: with IGNORECASE
+# it would swallow the "of" in "4 Pallets of Auto Goods" and produce an unknown
+# lot type whose transport cost resolves to 0.
 _LOT_TYPE_RE = re.compile(
-    r"(Small Truckload|Truckload|4 Pallets(?:\s+[A-Z]{2})?)", re.IGNORECASE
+    r"(Small Truckload|Truckload|4 Pallets(?-i:\s+[A-Z]{2}\b)?)", re.IGNORECASE
 )
 _COUNTRY_RE = re.compile(r"\b([A-Z]{2})\s+Stock\b")
 _ID_RE = re.compile(r"/id/(\d+)")

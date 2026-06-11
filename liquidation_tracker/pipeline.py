@@ -10,7 +10,7 @@ from .calculator import BidCalculator
 from .client import BStockClient, CloudflareChallenge
 from .config import Settings
 from .models import Auction
-from .notifier import EmailNotifier
+from .notifier import EmailNotifier, WhatsAppNotifier
 from .storage import Storage
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,10 @@ class MonitorPipeline:
         self.client = BStockClient()
         self.storage = Storage(settings.db_path)
         self.calculator = BidCalculator()
-        self.notifier = EmailNotifier(settings.email)
+        self.notifiers = [
+            EmailNotifier(settings.email),
+            WhatsAppNotifier(settings.whatsapp),
+        ]
         os.makedirs(settings.manifest_dir, exist_ok=True)
 
     def run(self, fetch_lot_ids: bool = False) -> List[Auction]:
@@ -57,7 +60,12 @@ class MonitorPipeline:
                 self.storage.upsert_auction(auction, decision.breakdown)
 
                 if decision.is_key and not self.storage.was_alerted(auction.auction_id):
-                    sent = self.notifier.send_auction_alert(auction, decision)
+                    sent = any(
+                        [
+                            notifier.send_auction_alert(auction, decision)
+                            for notifier in self.notifiers
+                        ]
+                    )
                     if sent:
                         self.storage.mark_alerted(auction.auction_id)
                     logger.info(
