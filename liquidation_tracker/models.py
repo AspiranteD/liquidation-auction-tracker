@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 
@@ -20,7 +20,9 @@ class Auction:
     current_bid: Optional[float] = None
     end_time: Optional[datetime] = None
     lot_id: Optional[str] = None  # B-Stock SKU used to download the manifest
-    scraped_at: datetime = field(default_factory=datetime.utcnow)
+    scraped_at: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
 
     def as_dict(self) -> Dict:
         data = asdict(self)

@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Iterator, List, Optional
 
 from .calculator import CostBreakdown
@@ -86,7 +86,7 @@ class Storage:
     def upsert_auction(
         self, auction: Auction, breakdown: Optional[CostBreakdown] = None
     ) -> None:
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         suggested_bid = breakdown.bid if breakdown else None
         estimated_total = breakdown.total_cost if breakdown else None
         total_pct = breakdown.total_pct_of_retail if breakdown else None

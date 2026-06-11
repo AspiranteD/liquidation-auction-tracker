@@ -9,7 +9,7 @@ Examples
     python -m liquidation_tracker.cli list --country ES
 
     # Compute the max bid for a lot
-    python -m liquidation_tracker.cli bid --retail 16670 --type "Small Truckload" --pct 0.25
+    python -m liquidation_tracker.cli bid --retail 16670 --type "Small Truckload" --pct 0.12
 
     # Analyze a manifest CSV
     python -m liquidation_tracker.cli analyze data/sample_manifest.csv
@@ -20,6 +20,9 @@ import argparse
 import logging
 import os
 import sys
+from datetime import datetime
+
+import requests
 
 from . import analyzer, insights, reports
 from .calculator import BidCalculator
@@ -46,7 +49,13 @@ def cmd_monitor(args: argparse.Namespace) -> int:
         settings.countries = [args.country]
         settings.rules.countries = [args.country]
     pipeline = MonitorPipeline(settings)
-    auctions = pipeline.run(fetch_lot_ids=args.lot_ids)
+    try:
+        auctions = pipeline.run(fetch_lot_ids=args.lot_ids)
+    except requests.RequestException as exc:
+        # Transient network failures are normal for a once-a-minute task:
+        # log cleanly and let the next run retry.
+        print(f"Network error, will retry next run: {exc}", file=sys.stderr)
+        return 2
     print(f"Processed {len(auctions)} auctions across {settings.countries}.")
     print(f"Database: {settings.db_path}")
     return 0
@@ -221,8 +230,8 @@ def cmd_watch(args: argparse.Namespace) -> int:
     client = BStockClient()
     try:
         results = reports.collect_reports(client, settings, only_new=True)
-    except CloudflareChallenge as exc:
-        print(f"Cloudflare challenge: {exc}", file=sys.stderr)
+    except (CloudflareChallenge, requests.RequestException) as exc:
+        print(f"No se pudo escanear B-Stock: {exc}", file=sys.stderr)
         return 2
 
     notifier = WhatsAppNotifier(settings.whatsapp)
@@ -243,15 +252,13 @@ def cmd_digest(args: argparse.Namespace) -> int:
     client = BStockClient()
     try:
         results = reports.collect_reports(client, settings, only_new=False)
-    except CloudflareChallenge as exc:
-        print(f"Cloudflare challenge: {exc}", file=sys.stderr)
+    except (CloudflareChallenge, requests.RequestException) as exc:
+        print(f"No se pudo escanear B-Stock: {exc}", file=sys.stderr)
         return 2
 
     if not results:
         print("Sin subastas activas; no se genera digest.")
         return 0
-
-    from datetime import datetime
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M")
     pdf_path = os.path.join(args.report_dir, "pdf", f"digest_{stamp}.pdf")
@@ -309,7 +316,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_bid.add_argument("--retail", type=float, required=True)
     p_bid.add_argument("--type", required=True,
                        help='Lot type, e.g. "Truckload" or "Small Truckload"')
-    p_bid.add_argument("--pct", type=float, default=0.25,
+    p_bid.add_argument("--pct", type=float, default=0.12,
                        help="Target landed cost as fraction of retail")
     p_bid.set_defaults(func=cmd_bid)
 

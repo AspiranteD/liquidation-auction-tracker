@@ -383,52 +383,58 @@ def collect_reports(
     pdf_dir = os.path.join(report_dir, "pdf")
     results: List[LotReport] = []
 
-    for country in settings.countries:
-        auctions = client.list_auctions(country=country)
-        for auction in auctions:
-            key = str(auction.auction_id)
-            entry = state.get(key)
-            if only_new and not _should_retry(entry, now):
-                continue  # already reported, or failed and still cooling down
+    # save_state runs even if the auction listing blows up mid-scan: losing
+    # the "done" marks would resend every WhatsApp summary on the next run.
+    try:
+        for country in settings.countries:
+            auctions = client.list_auctions(country=country)
+            for auction in auctions:
+                key = str(auction.auction_id)
+                entry = state.get(key)
+                if only_new and not _should_retry(entry, now):
+                    continue  # already reported, or failed and cooling down
 
-            report = LotReport(auction=auction)
-            try:
-                lot_id = auction.lot_id or client.fetch_lot_id(auction)
-                if not lot_id:
-                    raise RuntimeError("lot_id no encontrado")
-                csv_path = os.path.join(
-                    settings.manifest_dir, f"{auction.auction_id}_{lot_id}.csv"
-                )
-                if not os.path.exists(csv_path):
-                    client.download_manifest(lot_id, csv_path)
-                items = analyzer.parse_manifest(csv_path)
-                if not items:
-                    raise RuntimeError("manifiesto vacío")
-                label = f"{auction.auction_id}_{lot_id}"
-                result = insights.deep_analyze(items, label=label)
-                report.insights = result
-                report.csv_path = csv_path
-                # markdown + pdf alongside each other
-                md_path = os.path.join(report_dir, f"{label}.md")
-                with open(md_path, "w", encoding="utf-8") as fh:
-                    fh.write(insights.render_report(result))
-                report.pdf_path = render_pdf(
-                    result, os.path.join(pdf_dir, f"{label}.pdf"), auction
-                )
-                report.is_new = not entry or entry.get("status") != "done"
-                state[key] = {
-                    "status": "done",
-                    "last_attempt": now.isoformat(),
-                    "csv": csv_path,
-                    "pdf": report.pdf_path,
-                }
-            except Exception as exc:  # noqa: BLE001 - keep going per auction
-                report.error = str(exc)
-                state[key] = {"status": "failed", "last_attempt": now.isoformat()}
-                logger.warning("No report for %s: %s", auction.auction_id, exc)
-            results.append(report)
-
-    save_state(state)
+                report = LotReport(auction=auction)
+                try:
+                    lot_id = auction.lot_id or client.fetch_lot_id(auction)
+                    if not lot_id:
+                        raise RuntimeError("lot_id no encontrado")
+                    csv_path = os.path.join(
+                        settings.manifest_dir, f"{auction.auction_id}_{lot_id}.csv"
+                    )
+                    if not os.path.exists(csv_path):
+                        client.download_manifest(lot_id, csv_path)
+                    items = analyzer.parse_manifest(csv_path)
+                    if not items:
+                        raise RuntimeError("manifiesto vacío")
+                    label = f"{auction.auction_id}_{lot_id}"
+                    result = insights.deep_analyze(items, label=label)
+                    report.insights = result
+                    report.csv_path = csv_path
+                    # markdown + pdf alongside each other
+                    md_path = os.path.join(report_dir, f"{label}.md")
+                    with open(md_path, "w", encoding="utf-8") as fh:
+                        fh.write(insights.render_report(result))
+                    report.pdf_path = render_pdf(
+                        result, os.path.join(pdf_dir, f"{label}.pdf"), auction
+                    )
+                    report.is_new = not entry or entry.get("status") != "done"
+                    state[key] = {
+                        "status": "done",
+                        "last_attempt": now.isoformat(),
+                        "csv": csv_path,
+                        "pdf": report.pdf_path,
+                    }
+                except Exception as exc:  # noqa: BLE001 - keep going per auction
+                    report.error = str(exc)
+                    state[key] = {
+                        "status": "failed",
+                        "last_attempt": now.isoformat(),
+                    }
+                    logger.warning("No report for %s: %s", auction.auction_id, exc)
+                results.append(report)
+    finally:
+        save_state(state)
     return results
 
 

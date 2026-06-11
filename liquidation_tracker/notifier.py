@@ -171,6 +171,11 @@ class WhatsAppNotifier:
             logger.warning("WhatsApp config incomplete; cannot send alert.")
             return False
 
+        # CallMeBot delivers the text via a GET querystring; keep it well
+        # under URL-length limits.
+        if len(text) > 1800:
+            text = text[:1797] + "..."
+
         try:
             response = requests.get(
                 self.API_URL,

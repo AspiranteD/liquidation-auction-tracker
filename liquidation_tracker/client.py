@@ -99,4 +99,5 @@ class BStockClient:
             for chunk in response.iter_content(chunk_size=8192):
                 fh.write(chunk)
         logger.info("Saved manifest to %s", dest_path)
+        time.sleep(self.request_delay)
         return dest_path
