@@ -133,7 +133,10 @@ def _print_insights_summary(result: insights.ManifestInsights) -> None:
     print(f"  Retail efectivo: EUR {result.effective_retail:,.2f}")
     sure = sum(1 for g in result.giveaways if g.tier == "seguro")
     doubt = sum(1 for g in result.giveaways if g.tier == "dudoso")
-    print(f"  Regalados     : {sure} seguros, {doubt} dudosos")
+    print(
+        f"  Regalados     : {sure} seguros ({result.giveaway_value_sure:,.0f} EUR), "
+        f"{doubt} dudosos ({result.giveaway_value_doubt:,.0f} EUR)"
+    )
     print(
         f"  Contenedores  : {len(result.boxes)} cajas "
         f"({len(result.suspicious_boxes)} sospechosas), {len(result.pallets)} pallets "
@@ -153,7 +156,11 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     result = insights.deep_analyze(items, label=stem, verify_prices=args.verify)
     _print_insights_summary(result)
     path = _write_report(insights.render_report(result), args.report_dir, stem)
+    pdf_path = reports.render_pdf(
+        result, os.path.join(args.report_dir, "pdf", f"{stem}.pdf")
+    )
     print(f"\nInforme completo: {path}")
+    print(f"PDF: {pdf_path}")
     return 0
 
 
@@ -188,10 +195,11 @@ def cmd_manifests(args: argparse.Namespace) -> int:
             _print_insights_summary(result)
             stem = f"{auction.auction_id}_{lot_id}"
             path = _write_report(insights.render_report(result), args.report_dir, stem)
+            hidden = result.giveaway_value_sure + result.giveaway_value_doubt
             summary_lines.append(
                 f"- **#{auction.auction_id}** retail efectivo EUR "
                 f"{result.effective_retail:,.0f} (TVs -EUR {result.tv_loss_retail:,.0f}), "
-                f"{len(result.giveaways)} regalados, "
+                f"{len(result.giveaways)} regalados (~EUR {hidden:,.0f} ocultos), "
                 f"{len(result.suspicious_boxes)} cajas sospechosas -> [{stem}.md]({stem}.md)"
             )
             analyzed += 1
@@ -253,11 +261,13 @@ def cmd_digest(args: argparse.Namespace) -> int:
     analyzed = [r for r in results if r.insights]
     body_lines = [f"Informe de pallets B-Stock ({len(analyzed)} lotes analizados):", ""]
     for r in analyzed:
+        hidden = r.insights.giveaway_value_sure + r.insights.giveaway_value_doubt
         body_lines.append(
             f"- #{r.auction.auction_id} {r.auction.lot_type or '?'}: retail "
             f"{r.insights.total_retail:,.0f} EUR, efectivo "
             f"{r.insights.effective_retail:,.0f} EUR, "
-            f"{len(r.insights.giveaways)} regalados — {r.auction.url}"
+            f"{len(r.insights.giveaways)} regalados (~{hidden:,.0f} EUR ocultos) "
+            f"— {r.auction.url}"
         )
     failed = [r for r in results if r.error]
     if failed:

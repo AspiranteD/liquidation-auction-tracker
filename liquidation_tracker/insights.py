@@ -181,6 +181,16 @@ class GiveawayFinding:
     amazon_url: Optional[str] = None
     verified_price: Optional[float] = None  # filled by the optional live check
 
+    @property
+    def estimated_value(self) -> float:
+        """Best estimate of the item's real value (verified beats typical)."""
+        return (self.verified_price or self.typical_price) * self.item.qty
+
+    @property
+    def hidden_value(self) -> float:
+        """Value NOT reflected in the declared retail (the actual gift)."""
+        return max(0.0, self.estimated_value - self.item.line_retail)
+
 
 @dataclass
 class ContainerStats:
@@ -209,10 +219,13 @@ class ManifestInsights:
     tv_loss_retail: float          # declared retail of certain TVs (loss)
     effective_retail: float        # total_retail - tv_loss_retail
     giveaways: List[GiveawayFinding]
+    giveaway_value_sure: float        # hidden value in "seguro" findings
+    giveaway_value_doubt: float       # hidden value in "dudoso" findings
     boxes: List[ContainerStats]
     pallets: List[ContainerStats]
     suspicious_boxes: List[ContainerStats]
     suspicious_pallets: List[ContainerStats]
+    container_hidden_value: float     # speculative: sparse containers vs median
     top_items: List[ManifestItem]
     warnings: List[str] = field(default_factory=list)
 
@@ -486,6 +499,17 @@ def deep_analyze(
     boxes = container_analysis(items, "box_id", "caja", rules)
     pallets = container_analysis(items, "pallet_id", "pallet", rules)
 
+    # Speculative hidden value: how much declared value the sparse containers
+    # are missing versus the lot's median container. Boxes are preferred over
+    # pallets to avoid double counting (a pallet aggregates its boxes).
+    reference = boxes if boxes else pallets
+    container_hidden = 0.0
+    if len(reference) >= 2:
+        median_retail = statistics.median(c.retail for c in reference)
+        container_hidden = sum(
+            max(0.0, median_retail - c.retail) for c in reference if c.suspicious
+        )
+
     if not any(i.box_id for i in items):
         warnings.append("El manifiesto no trae columna de caja (PkgID): sin análisis por caja.")
     if not any(i.pallet_id for i in items):
@@ -513,10 +537,17 @@ def deep_analyze(
         tv_loss_retail=tv_loss,
         effective_retail=round(total_retail - tv_loss, 2),
         giveaways=giveaways,
+        giveaway_value_sure=round(
+            sum(g.hidden_value for g in giveaways if g.tier == "seguro"), 2
+        ),
+        giveaway_value_doubt=round(
+            sum(g.hidden_value for g in giveaways if g.tier == "dudoso"), 2
+        ),
         boxes=boxes,
         pallets=pallets,
         suspicious_boxes=[b for b in boxes if b.suspicious],
         suspicious_pallets=[p for p in pallets if p.suspicious],
+        container_hidden_value=round(container_hidden, 2),
         top_items=top_items,
         warnings=warnings,
     )
@@ -560,8 +591,12 @@ def render_report(insights: ManifestInsights) -> str:
         f"- **Retail efectivo (sin TVs): {insights.effective_retail:,.2f} EUR**",
         f"- Regalados detectados: **{len([g for g in insights.giveaways if g.tier == 'seguro'])} seguros, "
         f"{len([g for g in insights.giveaways if g.tier == 'dudoso'])} dudosos**",
+        f"- **Valor estimado regalado: {insights.giveaway_value_sure:,.2f} EUR seguros "
+        f"+ {insights.giveaway_value_doubt:,.2f} EUR dudosos** (pruebas en la sección de regalados)",
         f"- Cajas: {len(insights.boxes)} ({len(insights.suspicious_boxes)} sospechosas) · "
         f"Pallets: {len(insights.pallets)} ({len(insights.suspicious_pallets)} sospechosos)",
+        f"- Valor potencialmente sin declarar en contenedores escasos (orientativo): "
+        f"{insights.container_hidden_value:,.2f} EUR",
         "",
     ]
 
@@ -595,25 +630,41 @@ def render_report(insights: ManifestInsights) -> str:
 
     out += ["", "## Artículos regalados (mal clasificados)", ""]
     if insights.giveaways:
+        total_hidden = insights.giveaway_value_sure + insights.giveaway_value_doubt
+        out += [
+            f"**Valor estimado regalado: {total_hidden:,.2f} EUR** "
+            f"({insights.giveaway_value_sure:,.2f} EUR en seguros, "
+            f"{insights.giveaway_value_doubt:,.2f} EUR en dudosos). "
+            "Pruebas, una línea por artículo:",
+            "",
+        ]
         rows = []
         for g in insights.giveaways:
+            asin_link = (
+                f"[{g.item.asin}]({g.amazon_url})" if g.item.asin and g.amazon_url
+                else (g.item.asin or "-")
+            )
             verified = f"{g.verified_price:,.0f}" if g.verified_price else "-"
             rows.append([
                 (g.item.description or "")[:55],
+                asin_link,
                 f"{g.item.unit_retail:,.2f}",
-                f"{g.typical_price:,.0f}",
+                f"{g.estimated_value:,.0f}",
+                f"**{g.hidden_value:,.0f}**",
                 verified,
                 g.tier.upper(),
-                g.amazon_url or "-",
             ])
         out += _table(
-            ["Descripción", "Declarado EUR", "Típico EUR", "Amazon EUR", "Nivel", "Verificar"],
+            ["Descripción", "ASIN", "Declarado EUR", "Est. real EUR",
+             "Oculto EUR", "Amazon EUR", "Nivel"],
             rows,
         )
         out.append("")
         out.append(
-            "> Los *dudosos* requieren verificación manual (enlace Amazon). "
-            "El precio 'Amazon EUR' solo aparece si la comprobación automática funcionó."
+            "> 'Est. real' = precio verificado en Amazon si la comprobación "
+            "automática funcionó; si no, el precio típico mínimo del producto "
+            "(conservador). 'Oculto' = est. real − declarado. Los *dudosos* "
+            "requieren verificación manual: clic en el ASIN."
         )
     else:
         out.append("Sin regalados detectados con las reglas actuales.")

@@ -168,6 +168,27 @@ def test_breakdown_by_department():
     assert groups[0].pct_retail == 85.7
 
 
+def test_giveaway_value_estimation():
+    items = [
+        # iPhone declared at 10, typical 250 -> hidden 240 (sure)
+        _item(description="Apple iPhone 16 128GB", unit_retail=10.0),
+        # MacBook declared at 150, typical 600 -> hidden 450 (doubtful)
+        _item(description="Apple MacBook Air M3", unit_retail=150.0, asin="B0MB"),
+    ]
+    result = insights.deep_analyze(items)
+    assert result.giveaway_value_sure == 240.0
+    assert result.giveaway_value_doubt == 450.0
+
+
+def test_giveaway_evidence_in_report():
+    items = [_item(description="Apple iPhone 16 128GB", unit_retail=10.0, asin="B0IPHONE16")]
+    result = insights.deep_analyze(items, label="evidencia")
+    report = insights.render_report(result)
+    assert "Valor estimado regalado" in report
+    assert "[B0IPHONE16](https://www.amazon.es/dp/B0IPHONE16)" in report
+    assert "iPhone 16" in report
+
+
 def test_render_report_smoke():
     items = [
         _item(description='Samsung TV 50" UHD', unit_retail=400.0),

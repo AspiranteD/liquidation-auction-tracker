@@ -124,17 +124,31 @@ def _pdf_table(
     headers: List[str],
     rows: List[List[str]],
     widths: List[int],
+    links: Optional[List[Optional[str]]] = None,
+    link_col: Optional[int] = None,
 ) -> None:
+    """Bordered table. ``links``/``link_col`` make one column clickable
+    (one URL per row, e.g. the ASIN column pointing at Amazon)."""
     pdf.set_font(family, "B", 8)
     for header, width in zip(headers, widths):
         pdf.cell(width, 6, _safe(header, family), border=1)
     pdf.ln()
     pdf.set_font(family, "", 8)
-    for row in rows:
-        for value, width in zip(row, widths):
+    for row_index, row in enumerate(rows):
+        for col_index, (value, width) in enumerate(zip(row, widths)):
             # crude truncation so cells never overflow
             max_chars = max(4, int(width / 1.7))
-            pdf.cell(width, 6, _safe(str(value)[:max_chars], family), border=1)
+            link = ""
+            if links is not None and col_index == link_col:
+                link = links[row_index] or ""
+            if link:
+                pdf.set_text_color(0, 0, 200)
+            pdf.cell(
+                width, 6, _safe(str(value)[:max_chars], family),
+                border=1, link=link,
+            )
+            if link:
+                pdf.set_text_color(0, 0, 0)
         pdf.ln()
     pdf.ln(2)
 
@@ -164,9 +178,13 @@ def _render_lot_into(
         f"(media {result.avg_unit_retail:,.2f} EUR/ud)\n"
         f"TVs (pérdida): {result.tv_units} uds, {result.tv_loss_retail:,.2f} EUR\n"
         f"Retail efectivo (sin TVs): {result.effective_retail:,.2f} EUR\n"
-        f"Regalados: {sure_g} seguros, {doubt_g} dudosos  ·  "
+        f"Regalados: {sure_g} seguros, {doubt_g} dudosos — "
+        f"valor estimado regalado: {result.giveaway_value_sure:,.0f} EUR seguros "
+        f"+ {result.giveaway_value_doubt:,.0f} EUR dudosos\n"
         f"Cajas sospechosas: {len(result.suspicious_boxes)}/{len(result.boxes)}  ·  "
-        f"Pallets sospechosos: {len(result.suspicious_pallets)}/{len(result.pallets)}",
+        f"Pallets sospechosos: {len(result.suspicious_pallets)}/{len(result.pallets)}  ·  "
+        f"Valor potencial sin declarar en contenedores (orientativo): "
+        f"{result.container_hidden_value:,.0f} EUR",
     )
     pdf.ln(2)
 
@@ -201,15 +219,29 @@ def _render_lot_into(
         _pdf_line(pdf, family, "Sin televisores detectados.")
         pdf.ln(1)
 
-    _pdf_heading(pdf, family, "Artículos regalados")
+    total_hidden = result.giveaway_value_sure + result.giveaway_value_doubt
+    _pdf_heading(
+        pdf, family,
+        f"Artículos regalados — valor estimado: {total_hidden:,.0f} EUR",
+    )
     if result.giveaways:
+        _pdf_line(
+            pdf, family,
+            f"{result.giveaway_value_sure:,.0f} EUR en seguros + "
+            f"{result.giveaway_value_doubt:,.0f} EUR en dudosos. "
+            "Oculto = valor real estimado - declarado. El ASIN enlaza a Amazon.",
+            size=8,
+        )
         _pdf_table(
             pdf, family,
-            ["Descripción", "Declarado", "Típico", "Nivel", "ASIN"],
+            ["Descripción", "Declarado", "Est. real", "Oculto", "Nivel", "ASIN"],
             [[(g.item.description or ""), f"{g.item.unit_retail:,.2f}",
-              f"{g.typical_price:,.0f}", g.tier, g.item.asin or "-"]
+              f"{g.estimated_value:,.0f}", f"{g.hidden_value:,.0f}", g.tier,
+              g.item.asin or "-"]
              for g in result.giveaways],
-            [95, 22, 20, 18, 30],
+            [85, 20, 18, 18, 16, 28],
+            links=[g.amazon_url for g in result.giveaways],
+            link_col=5,
         )
     else:
         _pdf_line(pdf, family, "Sin regalados detectados.")
@@ -259,17 +291,19 @@ def build_digest_pdf(reports: List[LotReport], path: str) -> str:
 
     _pdf_table(
         pdf, family,
-        ["Subasta", "Tipo", "Retail EUR", "Efectivo EUR", "Regalados", "Cajas susp.", "Cierra"],
+        ["Subasta", "Tipo", "Retail EUR", "Efectivo EUR", "Regalado EUR",
+         "Cajas susp.", "Cierra"],
         [[
             f"#{r.auction.auction_id}",
             r.auction.lot_type or "?",
             f"{r.auction.retail_value:,.0f}" if r.auction.retail_value else "?",
             f"{r.insights.effective_retail:,.0f}",
-            str(len(r.insights.giveaways)),
+            f"{r.insights.giveaway_value_sure + r.insights.giveaway_value_doubt:,.0f}"
+            f" ({len(r.insights.giveaways)})",
             f"{len(r.insights.suspicious_boxes)}/{len(r.insights.boxes)}",
             f"{r.auction.end_time:%d/%m %H:%M}" if r.auction.end_time else "?",
         ] for r in analyzed],
-        [22, 32, 28, 28, 22, 24, 28],
+        [22, 32, 28, 28, 30, 22, 24],
     )
     if failed:
         _pdf_heading(pdf, family, "Sin manifiesto disponible", 11)
@@ -370,7 +404,16 @@ def build_whatsapp_lot_summary(report: LotReport) -> str:
     sure_g = sum(1 for g in r.giveaways if g.tier == "seguro")
     doubt_g = sum(1 for g in r.giveaways if g.tier == "dudoso")
     if sure_g or doubt_g:
-        lines.append(f"Regalados: {sure_g} seguros, {doubt_g} dudosos")
+        hidden = r.giveaway_value_sure + r.giveaway_value_doubt
+        lines.append(
+            f"Regalados: {sure_g} seguros, {doubt_g} dudosos "
+            f"(~{hidden:,.0f} EUR ocultos)"
+        )
+        for g in r.giveaways[:3]:
+            lines.append(
+                f"  · {(g.item.description or '')[:40]} — {g.item.unit_retail:,.0f} EUR "
+                f"(vale ~{g.estimated_value:,.0f})"
+            )
     if r.suspicious_boxes or r.suspicious_pallets:
         lines.append(
             f"Sospechosos: {len(r.suspicious_boxes)}/{len(r.boxes)} cajas, "
