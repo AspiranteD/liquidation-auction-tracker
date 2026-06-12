@@ -705,23 +705,28 @@ def analyze_containers(
         weights = [b.weight_kg for b in boxes if b.weight_kg]
         median_weight = statistics.median(weights) if weights else 0.0
 
+        lot_floor = max(
+            rules.box_min_units_abs, median_units * rules.box_sparse_fraction
+        )
         for box in boxes:
             dept = _box_department(box)
             base = baselines.get(dept) if baselines else None
+            lot_sparse = box.units <= lot_floor and box.units < median_units
             if base:
-                sparse = box.units < base["p10"]
+                # Anomalous for its CATEGORY and (when the lot offers enough
+                # boxes to compare) for its OWN lot: atypical lots — e.g. a
+                # big-toys truck whose boxes all run small — must not flood.
+                base_sparse = box.units < base["p10"]
+                sparse = base_sparse and (lot_sparse or len(boxes) < 8)
                 typical = f"{base['p25']:.0f}-{base['p75']:.0f}"
                 norm_note = (
                     f"en {dept} lo normal es {typical} por caja "
-                    f"(histórico de {base['n']} cajas)"
+                    f"(histórico de {base['n']} cajas) y en este lote "
+                    f"~{median_units:.0f}"
                 )
                 weight_ref = (base.get("weight") or {}).get("p50") or median_weight
             else:
-                floor = max(
-                    rules.box_min_units_abs,
-                    median_units * rules.box_sparse_fraction,
-                )
-                sparse = box.units <= floor and box.units < median_units
+                sparse = lot_sparse
                 norm_note = f"lo normal en este lote es ~{median_units:.0f} por caja"
                 weight_ref = median_weight
 
