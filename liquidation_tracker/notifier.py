@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import smtplib
 from email.message import EmailMessage
 from typing import Optional
@@ -278,11 +279,16 @@ class CallNotifier:
             logger.error("Failed to place call: %s", exc)
             return False
 
-        if response.status_code >= 400:
+        # CallMeBot answers 200 even on failures; check the body too.
+        body = response.text or ""
+        failed = re.search(
+            r"ERROR|not authorized|wrong format", body, re.IGNORECASE
+        )
+        if response.status_code >= 400 or failed:
             logger.error(
                 "CallMeBot call rejected (HTTP %s): %s",
                 response.status_code,
-                (response.text or "")[:200],
+                failed.group(0) if failed else body[:200],
             )
             return False
         logger.info("Call placed to %s", cfg.telegram_user)

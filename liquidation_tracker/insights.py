@@ -42,12 +42,15 @@ class InsightRules:
     giveaway_sure_fraction: float = 0.10
     giveaway_doubt_fraction: float = 0.40
 
-    # Boxes travel full to the top, so the only reliable emptiness signal is
-    # the DECLARED UNIT COUNT (a cheap-but-full box is not suspicious). Flag
-    # a true box when its units fall at or below this fraction of the lot's
-    # median box, with an absolute floor.
+    # Boxes travel full to the top. Few declared units means hidden content
+    # UNLESS the declared items are bulky enough to fill the box themselves
+    # (weight is the volume proxy; declared value is never a criterion).
     box_sparse_fraction: float = 0.35
     box_min_units_abs: int = 4
+    # A sparse box is excused when its total weight reaches this fraction of
+    # the median box weight, or its items average this many kg each.
+    box_bulky_weight_fraction: float = 0.6
+    bulky_avg_item_kg: float = 5.0
 
     # Amazon stacks this many boxes per "pallet de cajas"; fewer declared
     # boxes may mean whole undeclared boxes.
@@ -90,14 +93,47 @@ PREMIUM_PRODUCTS: Dict[str, float] = {
     r"\b(?:canon|nikon|sony)\b.*\b(?:[0-9]{2,3}\s?mm|f/[0-9.]+)": 200.0,
 }
 
+# Patterns that name a standalone DEVICE (console, phone, computer, GPU).
+# A peripheral that merely lists them as compatible platforms ("auriculares
+# gaming PC/PS5/Xbox") must not match.
+DEVICE_PATTERNS = {
+    r"iphone\s?(?:1[1-9]|se|pro|plus|max)",
+    r"\bmacbook\b",
+    r"\bimac\b",
+    r"\bmac\s?mini\b",
+    r"\bipad\b",
+    r"galaxy\s?(?:s2[0-9]|z\s?(?:fold|flip)|note)",
+    r"galaxy\s?tab\s?s",
+    r"\bpixel\s?[6-9]",
+    r"\bps5\b|playstation\s?5",
+    r"xbox\s+series\s?[xs]",
+    r"nintendo\s+switch",
+    r"\brtx\s?[2-5]0[5-9]0",
+}
+
+# If the line IS one of these peripherals, a device mention is just the
+# compatibility list, never the product itself.
+PERIPHERAL_WORDS = [
+    "auricular", "headset", "headphone", "earbud", "kopfhörer", "kopfhoerer",
+    "casque", "cascos", "altavoz", "speaker",
+    "micrófono", "microfono", "microphone", "mikrofon",
+    "mando", "controller", "gamepad", "joystick", "volante",
+    "teclado", "keyboard", "tastatur", "clavier", "tastiera",
+    "silla", "chair", "monitor", "ssd", "tarjeta", "memoria",
+    "base de carga", "charging station", "ventilador", "cooling",
+]
+
 # Words that mean the line is an accessory FOR a premium product / TV, not
 # the product itself. Spanish, English, German, French, Italian.
 ACCESSORY_WORDS = [
     "funda", "case", "carcasa", "cover", "hülle", "huelle", "coque", "custodia",
     "protector", "cristal", "glass", "vidrio", "panzerglas", "film", "folie",
     "pelicula", "película", "screen protector",
-    "cable", "cargador", "charger", "ladegerät", "ladegeraet", "chargeur",
+    "cable", "kabel", "câble", "cavo", "cargador", "charger", "ladegerät",
+    "ladegeraet", "ladekabel", "chargeur",
     "adaptador", "adapter", "adattatore", "dock", "hub",
+    "power bank", "powerbank", "batería externa", "bateria externa",
+    "selfie", "trípode", "tripode", "tripod",
     "soporte", "stand", "mount", "bracket", "halterung", "wandhalterung",
     "support mural", "staffa", "supporto",
     "ratón", "raton ", "mouse", "teclado", "keyboard", "alfombrilla",
@@ -164,6 +200,21 @@ def _is_compatibility_mention(desc: str, match_start: int) -> bool:
     return bool(_COMPATIBILITY_RE.search(prefix))
 
 
+# Product names often carry their dimensions ("120x60x40 cm"): a free volume
+# signal for judging whether few items can legitimately fill a box.
+_DIMENSIONS_RE = re.compile(
+    r"(\d{2,3})\s*[xX×]\s*(\d{1,3})\s*[xX×]\s*(\d{1,3})\s*(?:cm|CM)"
+)
+
+
+def _volume_liters(desc: Optional[str]) -> Optional[float]:
+    match = _DIMENSIONS_RE.search(desc or "")
+    if not match:
+        return None
+    a, b, c = (int(match.group(n)) for n in (1, 2, 3))
+    return a * b * c / 1000.0
+
+
 # ---------------------------------------------------------------------------
 # Result containers
 # ---------------------------------------------------------------------------
@@ -213,8 +264,10 @@ class ContainerStats:
     lines: int = 0
     units: int = 0
     retail: float = 0.0
+    weight_kg: float = 0.0
     suspicious: bool = False
     reason: str = ""
+    items: List[ManifestItem] = field(default_factory=list)
 
 
 @dataclass
@@ -236,6 +289,7 @@ class PalletStats:
     avg_weight_kg: Optional[float] = None
     suspicious: bool = False
     reason: str = ""
+    missing_boxes: int = 0  # box-pallets declare 6; fewer = likely gifted
 
 
 @dataclass
@@ -360,7 +414,10 @@ def find_giveaways(
         lowered = desc.lower()
         if any(word in lowered for word in SURVEILLANCE_WORDS):
             continue  # CCTV/webcams: cheap by nature, lens specs mislead
+        is_peripheral = any(word in lowered for word in PERIPHERAL_WORDS)
         for pattern, typical in PREMIUM_PRODUCTS.items():
+            if is_peripheral and pattern in DEVICE_PATTERNS:
+                continue  # "auriculares ... PS5": platform list, not a PS5
             match = re.search(pattern, desc, re.IGNORECASE)
             if match:
                 if _is_compatibility_mention(desc, match.start()):
@@ -457,6 +514,21 @@ def verify_giveaway_prices(
 # Box / pallet density
 # ---------------------------------------------------------------------------
 
+def _box_is_bulky(
+    box: ContainerStats, median_weight: float, rules: InsightRules
+) -> bool:
+    """Few declared items can still fill a box if they are big: judge by
+    total weight vs the lot's boxes, average item weight, or dimensions
+    parsed from the product names."""
+    if box.weight_kg and median_weight:
+        if box.weight_kg >= median_weight * rules.box_bulky_weight_fraction:
+            return True
+    if box.units and box.weight_kg / max(box.units, 1) >= rules.bulky_avg_item_kg:
+        return True
+    volume = sum(_volume_liters(i.description) or 0.0 for i in box.items)
+    return volume >= 200.0  # two hundred liters of declared product
+
+
 def analyze_containers(
     items: List[ManifestItem], rules: Optional[InsightRules] = None
 ) -> Tuple[List[ContainerStats], List[PalletStats]]:
@@ -510,11 +582,12 @@ def analyze_containers(
             missing = rules.expected_boxes_per_pallet - len(box_ids)
             if missing > 0:
                 pallet.suspicious = True
+                pallet.missing_boxes = missing
                 pallet.reason = (
-                    f"solo {len(box_ids)} de {rules.expected_boxes_per_pallet} cajas "
-                    f"declaradas (lo habitual es un pallet con "
-                    f"{rules.expected_boxes_per_pallet} cajas apiladas): puede haber "
-                    f"{missing} caja(s) enteras sin declarar"
+                    f"solo {len(box_ids)} de {rules.expected_boxes_per_pallet} "
+                    f"cajas declaradas — un pallet de cajas lleva SIEMPRE "
+                    f"{rules.expected_boxes_per_pallet}: lo más probable es que "
+                    f"{missing} caja(s) enteras vayan REGALADAS (sin declarar)"
                 )
             for box_id in box_ids:
                 b_items = [i for i in p_items if i.box_id == box_id]
@@ -525,22 +598,41 @@ def analyze_containers(
                         lines=len(b_items),
                         units=sum(i.qty for i in b_items),
                         retail=round(sum(i.line_retail for i in b_items), 2),
+                        weight_kg=round(
+                            sum((i.weight_kg or 0.0) * i.qty for i in b_items), 1
+                        ),
+                        items=b_items,
                     )
                 )
         pallets.append(pallet)
 
-    # Flag sparse boxes by UNIT COUNT only (boxes always travel full).
+    # Flag sparse boxes by UNIT COUNT, excused when the declared items are
+    # bulky enough (weight / dimensions in the name) to fill the box anyway.
     if len(boxes) >= 2:
         median_units = statistics.median(b.units for b in boxes)
+        weights = [b.weight_kg for b in boxes if b.weight_kg]
+        median_weight = statistics.median(weights) if weights else 0.0
         floor = max(rules.box_min_units_abs, median_units * rules.box_sparse_fraction)
         for box in boxes:
-            if box.units <= floor and box.units < median_units:
-                box.suspicious = True
+            if not (box.units <= floor and box.units < median_units):
+                continue
+            if _box_is_bulky(box, median_weight, rules):
                 box.reason = (
-                    f"{box.units} objetos declarados; lo normal en este lote es "
-                    f"~{median_units:.0f} por caja. Las cajas van llenas a tope: "
-                    f"puede haber regalados dentro"
+                    f"{box.units} objetos pero voluminosos "
+                    f"({box.weight_kg:.0f} kg): caja llena, normal"
                 )
+                continue
+            box.suspicious = True
+            weight_note = (
+                f" y solo {box.weight_kg:.0f} kg (caja típica ~{median_weight:.0f} kg)"
+                if median_weight
+                else ""
+            )
+            box.reason = (
+                f"{box.units} objetos declarados (lo normal ~{median_units:.0f} "
+                f"por caja){weight_note}. Las cajas van llenas a tope: "
+                f"probable contenido REGALADO dentro"
+            )
 
     boxes.sort(key=lambda b: b.units)
     type_order = {"cajas": 0, "granel": 1, "objetos grandes": 2}
@@ -626,6 +718,18 @@ def quick_read(insights: "ManifestInsights") -> List[str]:
     """
     bullets: List[str] = []
 
+    # Whole gifted boxes first: it is the single most valuable signal.
+    if insights.suspicious_pallets:
+        total_missing = sum(p.missing_boxes for p in insights.suspicious_pallets)
+        detail = "; ".join(
+            f"pallet {p.pallet_id}: {p.box_count} de 6"
+            for p in insights.suspicious_pallets[:4]
+        )
+        bullets.append(
+            f"🎁📦 ¡{total_missing} CAJAS ENTERAS probablemente REGALADAS! "
+            f"Los pallets de cajas llevan siempre 6 y aquí faltan ({detail})."
+        )
+
     if insights.giveaways:
         declared = sum(g.item.line_retail for g in insights.giveaways)
         estimated = sum(g.estimated_value for g in insights.giveaways)
@@ -639,17 +743,14 @@ def quick_read(insights: "ManifestInsights") -> List[str]:
         )
 
     if insights.suspicious_boxes:
-        ids = ", ".join(b.container_id for b in insights.suspicious_boxes[:5])
-        bullets.append(
-            f"📦 {len(insights.suspicious_boxes)} cajas van demasiado vacías "
-            f"(las llenan siempre a tope): puede haber regalados dentro — {ids}."
+        detail = "; ".join(
+            f"{b.container_id} ({b.units} objetos, {b.weight_kg:.0f} kg)"
+            for b in insights.suspicious_boxes[:4]
         )
-
-    if insights.suspicious_pallets:
-        ids = ", ".join(p.pallet_id for p in insights.suspicious_pallets[:5])
         bullets.append(
-            f"🧱 {len(insights.suspicious_pallets)} pallets de cajas con menos "
-            f"de 6 cajas declaradas: puede haber cajas enteras sin declarar — {ids}."
+            f"📦 {len(insights.suspicious_boxes)} cajas demasiado vacías para "
+            f"su peso (van siempre llenas a tope): probable contenido regalado "
+            f"dentro — {detail}. Contenido declarado listado abajo."
         )
 
     if insights.tv_units:
@@ -801,20 +902,47 @@ def render_report(insights: ManifestInsights) -> str:
     out += ["", "## Cajas (solo las de pallets de cajas: van siempre llenas a tope)", ""]
     if insights.boxes:
         out += _table(
-            ["Caja", "Objetos", "Retail EUR", "¿Demasiado vacía?"],
+            ["Caja", "Objetos", "Peso kg", "Retail EUR", "¿Demasiado vacía?"],
             [
-                [b.container_id[:20], str(b.units), f"{b.retail:,.0f}",
-                 ("🚩 " + b.reason) if b.suspicious else "no"]
+                [b.container_id[:20], str(b.units), f"{b.weight_kg:,.0f}",
+                 f"{b.retail:,.0f}",
+                 ("🚩 " + b.reason) if b.suspicious else (b.reason or "no")]
                 for b in insights.boxes
             ],
         )
         out.append("")
         out.append(
-            "> El valor de una caja NO indica regalados (puede llevar cosas "
-            "baratas): solo cuenta el número de objetos declarados."
+            "> Una caja con pocos objetos solo es sospechosa si además pesa "
+            "poco: pocos objetos voluminosos también llenan la caja. El valor "
+            "declarado nunca es criterio."
         )
     else:
         out.append("Este lote no tiene pallets de cajas.")
+
+    if insights.suspicious_boxes:
+        out += ["", "## Contenido declarado de las cajas sospechosas", ""]
+        out.append(
+            "Lo que SÍ declaran (poco y ligero): el hueco restante es el "
+            "contenido regalado probable. Verifica tamaños con el enlace."
+        )
+        for box in insights.suspicious_boxes:
+            out += ["", f"### Caja {box.container_id} — {box.units} objetos, "
+                        f"{box.weight_kg:,.0f} kg, {box.retail:,.0f} EUR", ""]
+            out += _table(
+                ["Artículo", "Uds", "Peso kg", "EUR", "Amazon"],
+                [
+                    [
+                        (i.description or "")[:60],
+                        str(i.qty),
+                        f"{i.weight_kg:.1f}" if i.weight_kg else "?",
+                        f"{i.line_retail:,.2f}",
+                        f"[{i.asin}]({AMAZON_URL.format(asin=i.asin)})" if i.asin else "-",
+                    ]
+                    for i in sorted(
+                        box.items, key=lambda x: x.line_retail, reverse=True
+                    )[:15]
+                ],
+            )
 
     out += ["", "## Pallets (clasificados)", ""]
     if insights.pallets:

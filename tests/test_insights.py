@@ -96,6 +96,25 @@ def test_surveillance_camera_not_flagged_as_lens():
     assert insights.find_giveaways(items) == []
 
 
+def test_gaming_peripheral_naming_console_not_flagged():
+    items = [
+        _item(description="The G-Lab Korp Cobalt Auriculares Gaming PC PS5 Xbox",
+              unit_retail=17.84, asin="B0GLAB1"),
+        _item(description="Corsair Void v2 Wireless Auriculares para Juegos PS5",
+              unit_retail=119.99, asin="B0CORS1"),
+        _item(description="Mando inalámbrico compatible Nintendo Switch",
+              unit_retail=15.0, asin="B0MANDO1"),
+    ]
+    assert insights.find_giveaways(items) == []
+
+
+def test_real_console_at_absurd_price_still_flagged():
+    items = [_item(description="Sony PlayStation 5 Slim 1TB Digital", unit_retail=20.0)]
+    found = insights.find_giveaways(items)
+    assert len(found) == 1
+    assert found[0].tier == "seguro"
+
+
 def test_compatibility_mention_not_flagged():
     items = [
         _item(description="Lápiz de Repuesto para Samsung Galaxy S25 Ultra", unit_retail=17.0),
@@ -171,19 +190,51 @@ def test_sparse_box_in_box_pallet_flagged():
     boxes, pallets = insights.analyze_containers(_box_pallet("P1", units))
     flagged = [b for b in boxes if b.suspicious]
     assert [b.container_id for b in flagged] == ["BSPARSE"]
-    assert "regalados dentro" in flagged[0].reason
+    assert "REGALADO" in flagged[0].reason
     # 6 of 6 boxes declared -> the pallet itself is fine.
     assert pallets[0].pallet_type == "cajas"
     assert pallets[0].suspicious is False
 
 
-def test_box_pallet_with_missing_boxes_flagged():
+def test_box_pallet_with_missing_boxes_flagged_as_gifted():
     boxes, pallets = insights.analyze_containers(
         _box_pallet("P1", {"B1": 40, "B2": 38, "B3": 41})
     )
     assert pallets[0].pallet_type == "cajas"
     assert pallets[0].suspicious is True
+    assert pallets[0].missing_boxes == 3
     assert "3 de 6" in pallets[0].reason
+    assert "REGALADAS" in pallets[0].reason
+
+
+def test_sparse_but_heavy_box_is_bulky_not_suspicious():
+    # Six boxes; the sparse one carries 3 items of 12 kg each (36 kg total,
+    # comparable to its 40 kg siblings): big objects fill it, not gifts.
+    units = {f"B{n}": 40 for n in range(5)}
+    items = _box_pallet("P1", units)  # 1 kg per item -> 40 kg per box
+    for n in range(3):
+        items.append(
+            _item(pallet_id="P1", box_id="BHEAVY",
+                  description=f"objeto voluminoso {n}", weight_kg=12.0)
+        )
+    boxes, _ = insights.analyze_containers(items)
+    heavy = next(b for b in boxes if b.container_id == "BHEAVY")
+    assert heavy.suspicious is False
+    assert "voluminosos" in heavy.reason
+
+
+def test_sparse_box_with_big_dimensions_in_name_not_suspicious():
+    units = {f"B{n}": 40 for n in range(5)}
+    items = _box_pallet("P1", units)
+    for n in range(3):
+        items.append(
+            _item(pallet_id="P1", box_id="BDIM",
+                  description=f"Mesa auxiliar madera 90x60x75 cm modelo {n}",
+                  weight_kg=None)
+        )
+    boxes, _ = insights.analyze_containers(items)
+    dim = next(b for b in boxes if b.container_id == "BDIM")
+    assert dim.suspicious is False
 
 
 def test_large_object_pallet_never_flagged_for_few_units():

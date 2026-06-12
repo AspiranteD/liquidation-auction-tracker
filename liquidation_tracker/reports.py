@@ -263,17 +263,44 @@ def _render_lot_into(
     if result.suspicious_boxes:
         _pdf_table(
             pdf, family,
-            ["Caja", "Objetos", "Retail EUR", "Motivo"],
-            [[b.container_id, b.units, f"{b.retail:,.0f}", b.reason]
+            ["Caja", "Objetos", "Peso kg", "Retail EUR", "Motivo"],
+            [[b.container_id, b.units, f"{b.weight_kg:,.0f}", f"{b.retail:,.0f}",
+              b.reason]
              for b in result.suspicious_boxes],
-            [30, 16, 24, 118],
+            [28, 15, 16, 22, 107],
         )
         _pdf_line(
             pdf, family,
-            "El valor de una caja NO indica regalados (puede llevar cosas "
-            "baratas): solo cuenta el número de objetos declarados.",
+            "Pocos objetos solo es sospechoso si además pesan poco (pocos "
+            "objetos voluminosos también llenan la caja). El valor declarado "
+            "nunca es criterio.",
             size=8,
         )
+        for box in result.suspicious_boxes:
+            _pdf_heading(
+                pdf, family,
+                f"Contenido declarado de la caja {box.container_id} "
+                f"({box.units} objetos, {box.weight_kg:,.0f} kg)",
+                size=10,
+            )
+            _pdf_table(
+                pdf, family,
+                ["Artículo", "Uds", "Peso kg", "EUR", "ASIN"],
+                [[(i.description or ""), i.qty,
+                  f"{i.weight_kg:.1f}" if i.weight_kg else "?",
+                  f"{i.line_retail:,.2f}", i.asin or "-"]
+                 for i in sorted(
+                     box.items, key=lambda x: x.line_retail, reverse=True
+                 )[:15]],
+                [98, 12, 18, 22, 30],
+                links=[
+                    (insights.AMAZON_URL.format(asin=i.asin) if i.asin else None)
+                    for i in sorted(
+                        box.items, key=lambda x: x.line_retail, reverse=True
+                    )[:15]
+                ],
+                link_col=4,
+            )
     else:
         _pdf_line(pdf, family, "Ninguna caja demasiado vacía.")
         pdf.ln(1)
