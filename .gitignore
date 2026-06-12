@@ -17,6 +17,8 @@ data/*.db
 data/manifests/
 data/reports/
 data/watch_state.json
+# Manifiestos de camiones propios exportados de la BBDD (datos de negocio)
+data/nuestros/
 *.log
 
 # OS / editor

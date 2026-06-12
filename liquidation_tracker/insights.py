@@ -16,6 +16,7 @@ Goes beyond analyzer.py's aggregate stats to answer buyer questions:
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 import statistics
@@ -26,6 +27,24 @@ from typing import Dict, List, Optional, Tuple
 from .models import ManifestItem
 
 logger = logging.getLogger(__name__)
+
+# Per-department box statistics built from the historical corpus by
+# scripts/build_baselines.py (24k+ real boxes). Lets the empty-box alarm be
+# category-aware: a Motor box normally carries 38-106 items (alarm under
+# ~23) while a Furniture box normally carries 7.
+BASELINES_PATH = "data/baselines.json"
+_baselines_cache: Optional[Dict] = None
+
+
+def load_baselines(path: str = BASELINES_PATH) -> Dict:
+    global _baselines_cache
+    if _baselines_cache is None:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                _baselines_cache = json.load(fh)
+        except (OSError, ValueError):
+            _baselines_cache = {}
+    return _baselines_cache
 
 
 # ---------------------------------------------------------------------------
@@ -575,8 +594,18 @@ def _box_is_bulky(
     return volume >= 200.0  # two hundred liters of declared product
 
 
+def _box_department(box: ContainerStats) -> str:
+    """Dominant department (by units) of a box's declared content."""
+    counts: Dict[str, int] = defaultdict(int)
+    for item in box.items:
+        counts[item.department or "?"] += item.qty
+    return max(counts, key=counts.get) if counts else "?"
+
+
 def analyze_containers(
-    items: List[ManifestItem], rules: Optional[InsightRules] = None
+    items: List[ManifestItem],
+    rules: Optional[InsightRules] = None,
+    baselines: Optional[Dict] = None,
 ) -> Tuple[List[ContainerStats], List[PalletStats]]:
     """Classify pallets and flag genuinely suspicious containers.
 
@@ -665,17 +694,40 @@ def analyze_containers(
                 )
         pallets.append(pallet)
 
-    # Flag sparse boxes by UNIT COUNT, excused when the declared items are
-    # bulky enough (weight / dimensions in the name) to fill the box anyway.
-    if len(boxes) >= 2:
+    # Flag sparse boxes by UNIT COUNT, judged against the HISTORICAL
+    # baseline of the box's department when available (a Motor box holds
+    # 38-106 items, a Furniture box 7: one generic threshold misfires both
+    # ways). Bulky declared items (weight / dimensions) excuse the box.
+    if baselines is None:
+        baselines = load_baselines()
+    if len(boxes) >= 2 or (boxes and baselines):
         median_units = statistics.median(b.units for b in boxes)
         weights = [b.weight_kg for b in boxes if b.weight_kg]
         median_weight = statistics.median(weights) if weights else 0.0
-        floor = max(rules.box_min_units_abs, median_units * rules.box_sparse_fraction)
+
         for box in boxes:
-            if not (box.units <= floor and box.units < median_units):
+            dept = _box_department(box)
+            base = baselines.get(dept) if baselines else None
+            if base:
+                sparse = box.units < base["p10"]
+                typical = f"{base['p25']:.0f}-{base['p75']:.0f}"
+                norm_note = (
+                    f"en {dept} lo normal es {typical} por caja "
+                    f"(histórico de {base['n']} cajas)"
+                )
+                weight_ref = (base.get("weight") or {}).get("p50") or median_weight
+            else:
+                floor = max(
+                    rules.box_min_units_abs,
+                    median_units * rules.box_sparse_fraction,
+                )
+                sparse = box.units <= floor and box.units < median_units
+                norm_note = f"lo normal en este lote es ~{median_units:.0f} por caja"
+                weight_ref = median_weight
+
+            if not sparse:
                 continue
-            if _box_is_bulky(box, median_weight, rules):
+            if _box_is_bulky(box, weight_ref, rules):
                 box.reason = (
                     f"{box.units} objetos pero voluminosos "
                     f"({box.weight_kg:.0f} kg): caja llena, normal"
@@ -683,14 +735,13 @@ def analyze_containers(
                 continue
             box.suspicious = True
             weight_note = (
-                f" y solo {box.weight_kg:.0f} kg (caja típica ~{median_weight:.0f} kg)"
-                if median_weight
+                f" y solo {box.weight_kg:.0f} kg (típico ~{weight_ref:.0f} kg)"
+                if weight_ref
                 else ""
             )
             box.reason = (
-                f"{box.units} objetos declarados (lo normal ~{median_units:.0f} "
-                f"por caja){weight_note}. Las cajas van llenas a tope: "
-                f"probable contenido REGALADO dentro"
+                f"{box.units} objetos declarados; {norm_note}{weight_note}. "
+                f"Las cajas van llenas a tope: probable contenido REGALADO dentro"
             )
 
     boxes.sort(key=lambda b: b.units)
@@ -708,6 +759,7 @@ def deep_analyze(
     label: str = "manifest",
     rules: Optional[InsightRules] = None,
     verify_prices: bool = False,
+    baselines: Optional[Dict] = None,
 ) -> ManifestInsights:
     """Run the full deep analysis over parsed manifest items."""
     rules = rules or InsightRules()
@@ -725,7 +777,7 @@ def deep_analyze(
     if verify_prices and any(g.tier == "dudoso" for g in giveaways):
         verify_giveaway_prices(giveaways)
 
-    boxes, pallets = analyze_containers(items, rules)
+    boxes, pallets = analyze_containers(items, rules, baselines)
 
     if not any(i.box_id for i in items):
         warnings.append("El manifiesto no trae columna de caja (PkgID): sin análisis por caja.")
