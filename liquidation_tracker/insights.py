@@ -59,6 +59,11 @@ class InsightRules:
     # A single-package pallet whose items average at least this weight (kg)
     # is a "pallet de objetos grandes": few units there is normal.
     large_object_weight_kg: float = 15.0
+    # ...but a single-package pallet with MANY light items matches the
+    # profile of exactly one Amazon box -> treat as a box-pallet with five
+    # boxes missing.
+    single_box_min_units: int = 20
+    single_box_max_avg_kg: float = 2.5
 
     # A "sure" TV must be declared at least at this price; below it the line
     # is downgraded to "posible" (converters/dongles mention 4K too).
@@ -85,6 +90,7 @@ PREMIUM_PRODUCTS: Dict[str, float] = {
     r"\brtx\s?[2-5]0[5-9]0": 250.0,
     r"\bdyson\b": 180.0,
     r"\bgopro\b": 150.0,
+    r"dji\s?mic": 89.0,   # before the brand pattern: mics are cheaper
     r"\bdji\b": 150.0,
     # Camera bodies and lenses ("objetivos")
     r"\b(?:eos|alpha|a[67]\s?(?:iii|iv|r)|nikon\s?z|lumix\s?(?:s|gh))\b": 300.0,
@@ -172,19 +178,25 @@ _TV_PANEL_TECH_RE = re.compile(
     r"\b(?:oled|qled|nanocell|uled|4k|uhd|ultra\s?hd|led\s?tv)\b", re.IGNORECASE
 )
 _TV_CATEGORY_RE = re.compile(r"\btv|television", re.IGNORECASE)
-# A category can say "TV" and still be accessories ("TV Mounts & Stands"):
-# don't let it promote the line to a sure TV.
+# A category can say "TV" and still be accessories or audio ("TV Mounts &
+# Stands", "TV Audio/Soundbars"): don't let it promote the line to a sure TV.
 _TV_CATEGORY_ACCESSORY_RE = re.compile(
-    r"accessor|mount|stand|soporte|bracket|cable|remote|mando", re.IGNORECASE
+    r"accessor|mount|stand|soporte|bracket|cable|remote|mando|audio|"
+    r"soundbar|speaker|altavoz",
+    re.IGNORECASE,
 )
+# Soundbars name "TV" and have panel-ish specs but are not panels.
+_SOUNDBAR_RE = re.compile(r"barra\s+de\s+sonido|sound\s?bar", re.IGNORECASE)
 
 AMAZON_URL = "https://www.amazon.es/dp/{asin}"
 
-# "para Samsung Galaxy S25", "compatible con MacBook", "for PS5"... — the
-# premium keyword names what the item works WITH, not what it is.
+# "para Samsung Galaxy S25", "compatible con MacBook", "für iPhone 15 Pro
+# Samsung Galaxy"... — the premium keyword names what the item works WITH,
+# not what it is. Compatibility lists run long, so allow several tokens
+# (with commas) between the preposition and the match.
 _COMPATIBILITY_RE = re.compile(
-    r"(?:\bpara|\bfor|\bcompatible[s]?(?:\s+(?:con|with))?|\bfür|\bfuer|"
-    r"\bpour|\bper|\badatto)\s+(?:[\w./+-]+\s+){0,3}$",
+    r"(?:\bpara|\bfor|\bcompatible[s]?(?:\s+(?:con|with))?|\bkompatibel(?:\s+mit)?|"
+    r"\bfür|\bfuer|\bpour|\bper|\badatto|\bzum|\bvon)\s+(?:[\w./+,-]+\s+){0,6}$",
     re.IGNORECASE,
 )
 
@@ -192,6 +204,24 @@ _COMPATIBILITY_RE = re.compile(
 def _has_accessory_word(text: str) -> bool:
     lowered = text.lower()
     return any(word in lowered for word in ACCESSORY_WORDS)
+
+
+def _first_word_pos(text: str, words: List[str]) -> Optional[int]:
+    """Position of the earliest occurrence of any word, or None."""
+    lowered = text.lower()
+    positions = [lowered.find(w) for w in words if w in lowered]
+    return min(positions) if positions else None
+
+
+def _word_before(text: str, words: List[str], match_start: int) -> bool:
+    """True when a word appears BEFORE ``match_start`` in the text.
+
+    Product titles lead with the head noun: "Funda para iPhone 16" is a
+    case, while "iPhone 16 Pro 128GB de memoria" is a phone whose specs
+    mention memory. Position decides which one we are looking at.
+    """
+    pos = _first_word_pos(text, words)
+    return pos is not None and pos < match_start
 
 
 def _is_compatibility_mention(desc: str, match_start: int) -> bool:
@@ -356,14 +386,23 @@ def find_tvs(
         desc = item.description or ""
         cat_text = " ".join(filter(None, [item.category, item.subcategory]))
 
-        if _has_accessory_word(desc):
-            continue  # TV stand / mount / remote / stick: not a panel
+        if _SOUNDBAR_RE.search(desc):
+            continue  # audio device, not a panel: no loss to assume
+
+        # Accessory titles lead with the accessory ("Soporte de pared para
+        # TV", "Fire TV Stick"); real TVs mention extras AFTER the TV name
+        # ("Samsung Smart TV 75Q60T ... One Remote Control, Chromecast").
+        kw_match = _TV_KEYWORD_RE.search(desc)
+        kw_pos = kw_match.start() if kw_match else None
+        acc_pos = _first_word_pos(desc, ACCESSORY_WORDS)
+        if acc_pos is not None and (kw_pos is None or acc_pos <= kw_pos):
+            continue
 
         category_says_tv = bool(
             _TV_CATEGORY_RE.search(cat_text)
             and not _TV_CATEGORY_ACCESSORY_RE.search(cat_text)
         )
-        keyword = bool(_TV_KEYWORD_RE.search(desc))
+        keyword = kw_match is not None
         size = bool(_SCREEN_SIZE_RE.search(desc))
         panel_tech = bool(_TV_PANEL_TECH_RE.search(desc))
 
@@ -404,22 +443,29 @@ def find_giveaways(
     rules = rules or InsightRules()
     findings: List[GiveawayFinding] = []
 
-    # Signal 1: premium product at an absurd declared price.
+    # Signal 1: premium product at an absurd declared price. A premium
+    # product declared at 0.00 EUR is the most extreme giveaway possible,
+    # so a missing price never disqualifies the line.
     for item in items:
         desc = item.description or ""
-        if not desc or item.unit_retail <= 0:
-            continue
-        if _has_accessory_word(desc):
+        if not desc or item.unit_retail < 0:
             continue
         lowered = desc.lower()
         if any(word in lowered for word in SURVEILLANCE_WORDS):
             continue  # CCTV/webcams: cheap by nature, lens specs mislead
-        is_peripheral = any(word in lowered for word in PERIPHERAL_WORDS)
         for pattern, typical in PREMIUM_PRODUCTS.items():
-            if is_peripheral and pattern in DEVICE_PATTERNS:
-                continue  # "auriculares ... PS5": platform list, not a PS5
             match = re.search(pattern, desc, re.IGNORECASE)
             if match:
+                # Titles lead with the head noun: an accessory/peripheral
+                # word BEFORE the premium match means the line is the
+                # accessory ("Funda para iPhone", "Auriculares ... PS5"),
+                # after it is just specs ("iPhone 16 128GB de memoria").
+                if _word_before(desc, ACCESSORY_WORDS, match.start()):
+                    continue
+                if pattern in DEVICE_PATTERNS and _word_before(
+                    desc, PERIPHERAL_WORDS, match.start()
+                ):
+                    continue
                 if _is_compatibility_mention(desc, match.start()):
                     continue  # "para iPhone 16", "compatible con MacBook"...
                 ratio = item.unit_retail / typical
@@ -558,10 +604,23 @@ def analyze_containers(
 
     for pallet_id, p_items in by_pallet.items():
         box_ids = sorted({i.box_id for i in p_items if i.box_id})
-        weights = [i.weight_kg for i in p_items if i.weight_kg]
-        avg_weight = sum(weights) / len(weights) if weights else None
+        weighted = [(i.weight_kg * i.qty, i.qty) for i in p_items if i.weight_kg]
+        total_w = sum(w for w, _ in weighted)
+        total_q = sum(q for _, q in weighted)
+        avg_weight = total_w / total_q if total_q else None
+        units = sum(i.qty for i in p_items)
 
         if len(box_ids) >= 2:
+            pallet_type = "cajas"
+        elif (
+            len(box_ids) == 1
+            and units >= rules.single_box_min_units
+            and avg_weight is not None
+            and avg_weight <= rules.single_box_max_avg_kg
+        ):
+            # Dozens of small light items under a single PkgID is the
+            # profile of exactly ONE Amazon box: the other five boxes of
+            # the pallet are likely gifted.
             pallet_type = "cajas"
         elif avg_weight is not None and avg_weight >= rules.large_object_weight_kg:
             pallet_type = "objetos grandes"

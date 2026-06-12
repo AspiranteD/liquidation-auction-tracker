@@ -115,6 +115,62 @@ def test_real_console_at_absurd_price_still_flagged():
     assert found[0].tier == "seguro"
 
 
+def test_devices_with_spec_words_after_name_still_flagged():
+    # Spec vocabulary (memoria, SSD, tarjeta, mandos) AFTER the device name
+    # must not disable detection: these are real devices, not peripherals.
+    items = [
+        _item(description="Apple iPhone 16 Pro 128GB de memoria interna",
+              unit_retail=12.0, asin="B0SPEC1"),
+        _item(description="Apple MacBook Air M2 con 256GB SSD",
+              unit_retail=30.0, asin="B0SPEC2"),
+        _item(description="MSI GeForce RTX 5080, tarjeta grafica, triple ventilador",
+              unit_retail=20.0, asin="B0SPEC3"),
+        _item(description="PlayStation 5 Slim 1TB + 2 Mandos DualSense",
+              unit_retail=25.0, asin="B0SPEC4"),
+    ]
+    found = insights.find_giveaways(items)
+    assert len(found) == 4
+    assert all(f.tier == "seguro" for f in found)
+
+
+def test_apple_watch_with_strap_mention_flagged():
+    items = [
+        _item(description="Apple Watch Series 10 GPS 42mm con Correa deportiva",
+              unit_retail=9.0)
+    ]
+    found = insights.find_giveaways(items)
+    assert len(found) == 1
+    assert found[0].tier == "seguro"
+
+
+def test_premium_declared_at_zero_is_flagged():
+    items = [_item(description="Apple iPad Air 11 pulgadas M2", unit_retail=0.0)]
+    found = insights.find_giveaways(items)
+    assert len(found) == 1
+    assert found[0].tier == "seguro"
+
+
+def test_tv_mentioning_remote_or_chromecast_detected():
+    # Real panels list extras after the name; they must not be skipped.
+    items = [
+        _item(description='Samsung QLED 4K 75Q60T Smart TV de 75" One Remote Control',
+              unit_retail=2032.0),
+        _item(description='TCL 65V6C Smart TV 65" 4K HDR Chromecast Built-in',
+              unit_retail=696.0),
+    ]
+    tvs = insights.find_tvs(items)
+    assert len(tvs) == 2
+    assert all(t.confidence == "seguro" for t in tvs)
+
+
+def test_soundbar_is_not_a_tv():
+    items = [
+        _item(description="ULTIMEA 4.1ch Barra de Sonido TV Bluetooth",
+              unit_retail=110.0, subcategory="TV Audio/Soundbars")
+    ]
+    assert insights.find_tvs(items) == []
+
+
 def test_compatibility_mention_not_flagged():
     items = [
         _item(description="Lápiz de Repuesto para Samsung Galaxy S25 Ultra", unit_retail=17.0),
@@ -259,6 +315,21 @@ def test_loose_medium_pallet_is_granel():
     _, pallets = insights.analyze_containers(items)
     assert pallets[0].pallet_type == "granel"
     assert pallets[0].suspicious is False
+
+
+def test_single_box_pallet_of_light_items_counts_missing_boxes():
+    # 40 small light items under ONE PkgID = exactly one Amazon box: the
+    # other five boxes of the pallet are likely gifted.
+    items = [
+        _item(pallet_id="P1", box_id="PKGX", description=f"articulo {n}",
+              weight_kg=0.5)
+        for n in range(40)
+    ]
+    boxes, pallets = insights.analyze_containers(items)
+    assert pallets[0].pallet_type == "cajas"
+    assert pallets[0].box_count == 1
+    assert pallets[0].missing_boxes == 5
+    assert pallets[0].suspicious is True
 
 
 def test_cheap_but_full_box_not_flagged():

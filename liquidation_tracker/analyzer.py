@@ -65,14 +65,29 @@ def _read_text(csv_path: str) -> str:
     """Read the CSV decoding UTF-8 first, falling back to cp1252.
 
     Real B-Stock manifests are often cp1252-encoded (accented Spanish/German
-    descriptions); decoding them as UTF-8 mangles every accent.
+    descriptions); decoding them as UTF-8 mangles every accent. Some come
+    double-encoded from origin ("EstaciÃ³n"): repair that too, or keyword
+    filters (micrófono, cámara...) silently stop matching.
     """
     with open(csv_path, "rb") as fh:
         raw = fh.read()
     try:
-        return raw.decode("utf-8-sig")
+        text = raw.decode("utf-8-sig")
     except UnicodeDecodeError:
         return raw.decode("cp1252", errors="replace")
+    if text.count("Ã") >= 3:  # mojibake: UTF-8 read once more as cp1252
+        # Repair line by line: a single non-cp1252 char elsewhere in the
+        # file must not abort the whole repair.
+        repaired = []
+        for line in text.splitlines(keepends=True):
+            if "Ã" in line:
+                try:
+                    line = line.encode("cp1252").decode("utf-8")
+                except (UnicodeEncodeError, UnicodeDecodeError):
+                    pass
+            repaired.append(line)
+        text = "".join(repaired)
+    return text
 
 
 def parse_manifest(csv_path: str) -> List[ManifestItem]:
