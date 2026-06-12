@@ -159,14 +159,19 @@ Two channels, independently switchable in `.env`:
   `CALLMEBOT_APIKEY`, set `CALLMEBOT_PHONE` to your number in international
   format and `WHATSAPP_ALERTS_ENABLED=true`.
 
-Alerts are **reminders tied to the auction close**, evaluated with the bid as
-it stands at that moment (so run the monitor every ~5 minutes):
+Alerts are a **reminder ladder tied to the auction close**, evaluated with the
+bid as it stands at each run (so run the monitor every minute near close
+time):
 
-- **T-30**: first reminder inside the last `REMINDER_WINDOW_MINUTES` (30) before
-  close, if the auction still qualifies.
-- **T-5 last call**: a second reminder inside the last
-  `FINAL_REMINDER_WINDOW_MINUTES` (5) when the lot is still a very good deal
-  (total landed cost ≤ `ALERT_VERY_GOOD_TOTAL_PCT`, default 10%).
+- One WhatsApp/email per stage as the close approaches — default
+  `REMINDER_STAGES=30,15,10,5` (minutes to close) — while the lot still
+  qualifies. An auction first seen mid-ladder starts at the tightest
+  applicable stage.
+- **Voice-call escalation**: at `CALL_AT_MINUTES` (5) or less, an additional
+  phone-style call through the free
+  [CallMeBot Telegram call API](https://www.callmebot.com/blog/telegram-call-api/)
+  (a TTS voice reads the alert), once per auction. Setup: send `/start` to
+  `@CallMeBot_txtbot` on Telegram and set `CALLMEBOT_TELEGRAM_USER`.
 
 An auction qualifies when it passes every rule:
 

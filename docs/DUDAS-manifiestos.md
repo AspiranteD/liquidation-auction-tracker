@@ -116,6 +116,24 @@ del monitor sin hablarlo (son 2 peticiones extra por subasta clave).
 - **El PC debe estar encendido a las 12:30**: la tarea diaria con repetición
   no se recupera si en ese momento está apagado (se reanuda al día siguiente).
 
+## 10. Llamada de voz a ≤5 min (12/06)
+
+Implementada la escalera 30/15/10/5 por WhatsApp + **llamada de voz** cuando
+quedan ≤5 min y el lote sigue dentro del umbral. La llamada es gratuita vía
+CallMeBot: te suena como llamada de **Telegram** y una voz lee la alerta
+(puja actual, % de coste, máximo recomendado).
+
+**Para activarla necesito de ti** (2 minutos):
+1. Instala Telegram (si no lo tienes) con tu número.
+2. Busca el bot `@CallMeBot_txtbot` y envíale `/start`.
+3. Pásame tu usuario de Telegram (ej. `@guillem`) — lo pongo en el `.env` y
+   hago una llamada de prueba.
+
+**Limitación**: NO es una llamada a tu número de teléfono normal (eso solo se
+puede gratis... no se puede; sería Twilio, ~0,05 €/llamada + número ~5 €/mes).
+La llamada de Telegram suena y se contesta exactamente igual que una llamada
+normal si tienes la app instalada.
+
 ## Cómo usarlo
 
 ```bash

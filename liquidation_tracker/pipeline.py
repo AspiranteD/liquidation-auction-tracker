@@ -11,7 +11,7 @@ from .calculator import BidCalculator
 from .client import BStockClient, CloudflareChallenge
 from .config import Settings
 from .models import Auction
-from .notifier import EmailNotifier, WhatsAppNotifier
+from .notifier import CallNotifier, EmailNotifier, WhatsAppNotifier
 from .storage import Storage
 
 logger = logging.getLogger(__name__)
@@ -27,18 +27,19 @@ class MonitorPipeline:
             EmailNotifier(settings.email),
             WhatsAppNotifier(settings.whatsapp),
         ]
+        self.caller = CallNotifier(settings.call)
         os.makedirs(settings.manifest_dir, exist_ok=True)
 
     def run(self, fetch_lot_ids: bool = False) -> List[Auction]:
         """Scrape every monitored country, persist results and fire reminders.
 
-        Alerts are reminders tied to the close time, evaluated with the bid as
-        it stands at that moment:
+        Alerts are a reminder ladder tied to the close time, evaluated with
+        the bid as it stands at each run (the monitor runs every minute):
 
-        - "t30": first run inside the 30-minute window before close, if the
-          auction still qualifies.
-        - "t5": last call inside the 5-minute window, only when the lot is
-          still a very good deal (total cost <= the very-good ceiling).
+        - One WhatsApp/email per stage as the close approaches (default
+          stages: 30, 15, 10 and 5 minutes), while the lot still qualifies.
+        - At ``call_at_minutes`` (default 5) or less, an additional voice
+          call (CallMeBot Telegram call), once per auction.
 
         ``fetch_lot_ids`` opens each detail page to resolve the manifest SKU.
         It is off by default to keep the run light and avoid extra requests.
@@ -68,26 +69,51 @@ class MonitorPipeline:
                 decision = alerts.evaluate(auction, rules, self.calculator)
                 self.storage.upsert_auction(auction, decision.breakdown)
 
-                if decision.is_key and auction.end_time is not None:
+                stages = sorted(rules.reminder_stages, reverse=True)
+                if (
+                    decision.is_key
+                    and auction.end_time is not None
+                    and stages
+                ):
                     minutes_left = (
                         auction.end_time - now
                     ).total_seconds() / 60.0
 
-                    if (
-                        0 < minutes_left <= rules.final_reminder_window_min
-                        and decision.very_good
-                        and not self.storage.was_alerted(auction.auction_id, "t5")
-                    ):
-                        if self._send_alert(auction, decision, "t5", minutes_left):
-                            self.storage.mark_alerted(auction.auction_id, "t5")
-                            # The last call supersedes a pending first reminder.
-                            self.storage.mark_alerted(auction.auction_id, "t30")
-                    elif (
-                        0 < minutes_left <= rules.reminder_window_min
-                        and not self.storage.was_alerted(auction.auction_id, "t30")
-                    ):
-                        if self._send_alert(auction, decision, "t30", minutes_left):
-                            self.storage.mark_alerted(auction.auction_id, "t30")
+                    if 0 < minutes_left <= max(stages):
+                        # Tightest stage containing the current time-to-close
+                        # (e.g. 12 min left -> the 15-minute stage).
+                        current = min(s for s in stages if minutes_left <= s)
+                        stage_name = f"t{current}"
+                        if not self.storage.was_alerted(
+                            auction.auction_id, stage_name
+                        ):
+                            if self._send_alert(
+                                auction, decision, stage_name, minutes_left
+                            ):
+                                # Skipped wider stages can never fire later;
+                                # mark them so the ladder state stays clean.
+                                for s in stages:
+                                    if s >= current:
+                                        self.storage.mark_alerted(
+                                            auction.auction_id, f"t{s}"
+                                        )
+
+                        if (
+                            minutes_left <= rules.call_at_minutes
+                            and not self.storage.was_alerted(
+                                auction.auction_id, "call"
+                            )
+                        ):
+                            called = self.caller.call_auction_alert(
+                                auction, decision, minutes_left
+                            )
+                            if called:
+                                self.storage.mark_alerted(auction.auction_id, "call")
+                            logger.info(
+                                "KEY auction %s call escalation - placed: %s",
+                                auction.auction_id,
+                                called,
+                            )
 
                 all_auctions.append(auction)
 

@@ -7,6 +7,7 @@ log for trend analysis.
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -32,9 +33,7 @@ CREATE TABLE IF NOT EXISTS auction (
     total_pct       REAL,
     first_seen      TEXT,
     last_seen       TEXT,
-    alerted         INTEGER DEFAULT 0,
-    alerted_t30     INTEGER DEFAULT 0,
-    alerted_t5      INTEGER DEFAULT 0
+    alerted         INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS bid_snapshot (
@@ -45,18 +44,20 @@ CREATE TABLE IF NOT EXISTS bid_snapshot (
     FOREIGN KEY (auction_id) REFERENCES auction (auction_id)
 );
 
+CREATE TABLE IF NOT EXISTS alert_log (
+    auction_id   INTEGER NOT NULL,
+    stage        TEXT NOT NULL,
+    sent_at      TEXT,
+    PRIMARY KEY (auction_id, stage)
+);
+
 CREATE INDEX IF NOT EXISTS idx_auction_country ON auction (country);
 CREATE INDEX IF NOT EXISTS idx_snapshot_auction ON bid_snapshot (auction_id);
 """
 
-# Reminder stages: "t30" (~30 min before close) and "t5" (last call, ~5 min).
-ALERT_STAGES = ("t30", "t5")
-
-# Columns added after the initial release; applied to pre-existing databases.
-_MIGRATIONS = (
-    "ALTER TABLE auction ADD COLUMN alerted_t30 INTEGER DEFAULT 0",
-    "ALTER TABLE auction ADD COLUMN alerted_t5 INTEGER DEFAULT 0",
-)
+# Stage names: "t30"/"t15"/"t10"/"t5" for the reminder ladder, "call" for
+# the voice-call escalation.
+_STAGE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
 class Storage:
@@ -67,11 +68,6 @@ class Storage:
             os.makedirs(parent, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
-            for statement in _MIGRATIONS:
-                try:
-                    conn.execute(statement)
-                except sqlite3.OperationalError:
-                    pass  # column already exists
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -140,25 +136,27 @@ class Storage:
             )
 
     @staticmethod
-    def _stage_column(stage: str) -> str:
-        if stage not in ALERT_STAGES:
-            raise ValueError(f"Unknown alert stage: {stage!r}")
-        return f"alerted_{stage}"
+    def _check_stage(stage: str) -> str:
+        if not _STAGE_RE.match(stage):
+            raise ValueError(f"Invalid alert stage: {stage!r}")
+        return stage
 
     def was_alerted(self, auction_id: int, stage: str = "t30") -> bool:
-        column = self._stage_column(stage)
+        self._check_stage(stage)
         with self._connect() as conn:
             row = conn.execute(
-                f"SELECT {column} FROM auction WHERE auction_id = ?", (auction_id,)
+                "SELECT 1 FROM alert_log WHERE auction_id = ? AND stage = ?",
+                (auction_id, stage),
             ).fetchone()
-            return bool(row and row[column])
+            return row is not None
 
     def mark_alerted(self, auction_id: int, stage: str = "t30") -> None:
-        column = self._stage_column(stage)
+        self._check_stage(stage)
         with self._connect() as conn:
             conn.execute(
-                f"UPDATE auction SET {column} = 1 WHERE auction_id = ?",
-                (auction_id,),
+                "INSERT OR IGNORE INTO alert_log (auction_id, stage, sent_at) "
+                "VALUES (?, ?, ?)",
+                (auction_id, stage, datetime.now(timezone.utc).isoformat()),
             )
 
     def all_auctions(self) -> List[sqlite3.Row]:

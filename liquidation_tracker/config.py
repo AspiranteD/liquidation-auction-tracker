@@ -64,6 +64,19 @@ class EmailConfig:
         )
 
 
+def _get_int_list(name: str, default: List[int]) -> List[int]:
+    raw = _get_list(name, [])
+    if not raw:
+        return list(default)
+    values: List[int] = []
+    for part in raw:
+        try:
+            values.append(int(part))
+        except ValueError:
+            continue
+    return values or list(default)
+
+
 @dataclass
 class WhatsAppConfig:
     """CallMeBot WhatsApp alerts (https://www.callmebot.com/blog/free-api-whatsapp-messages/)."""
@@ -78,6 +91,31 @@ class WhatsAppConfig:
             enabled=os.getenv("WHATSAPP_ALERTS_ENABLED", "false").lower() == "true",
             phone=os.getenv("CALLMEBOT_PHONE"),
             apikey=os.getenv("CALLMEBOT_APIKEY"),
+        )
+
+
+@dataclass
+class CallConfig:
+    """Voice-call escalation through CallMeBot's Telegram call API.
+
+    Free, but needs a one-time setup: install Telegram and send /start to
+    @CallMeBot_txtbot so it is allowed to call you. The call rings on
+    Telegram and a TTS voice reads the alert.
+    """
+
+    enabled: bool = False
+    telegram_user: Optional[str] = None  # "@usuario" or +34... phone
+    lang: str = "es-ES-Standard-A"
+    repeats: int = 2                     # times the message is read
+
+    @classmethod
+    def from_env(cls) -> "CallConfig":
+        defaults = cls()
+        return cls(
+            enabled=os.getenv("CALL_ALERTS_ENABLED", "false").lower() == "true",
+            telegram_user=os.getenv("CALLMEBOT_TELEGRAM_USER"),
+            lang=os.getenv("CALL_LANG", defaults.lang),
+            repeats=_get_int("CALL_REPEAT", defaults.repeats),
         )
 
 
@@ -116,9 +154,11 @@ class AlertRules:
         ]
     )
 
-    # Alerts fire as reminders before close, not when the auction appears.
-    reminder_window_min: int = 30        # first reminder: <= 30 min to close
-    final_reminder_window_min: int = 5   # last call: <= 5 min to close and very good
+    # Reminder ladder: minutes-to-close thresholds, one WhatsApp per stage
+    # as the auction approaches its close (alerts only, never on listing).
+    reminder_stages: List[int] = field(default_factory=lambda: [30, 15, 10, 5])
+    # At or under this many minutes to close, escalate with a voice call.
+    call_at_minutes: int = 5
 
     countries: List[str] = field(default_factory=lambda: ["ES"])
     min_pieces: int = 0
@@ -146,12 +186,11 @@ class AlertRules:
             electronics_keywords=_get_list(
                 "ELECTRONICS_KEYWORDS", defaults.electronics_keywords
             ),
-            reminder_window_min=_get_int(
-                "REMINDER_WINDOW_MINUTES", defaults.reminder_window_min
+            reminder_stages=sorted(
+                _get_int_list("REMINDER_STAGES", defaults.reminder_stages),
+                reverse=True,
             ),
-            final_reminder_window_min=_get_int(
-                "FINAL_REMINDER_WINDOW_MINUTES", defaults.final_reminder_window_min
-            ),
+            call_at_minutes=_get_int("CALL_AT_MINUTES", defaults.call_at_minutes),
             countries=_get_list("MONITOR_COUNTRIES", ["ES"]),
             min_pieces=_get_int("ALERT_MIN_PIECES", 0),
         )
@@ -164,6 +203,7 @@ class Settings:
     countries: List[str] = field(default_factory=lambda: ["ES"])
     email: EmailConfig = field(default_factory=EmailConfig)
     whatsapp: WhatsAppConfig = field(default_factory=WhatsAppConfig)
+    call: CallConfig = field(default_factory=CallConfig)
     rules: AlertRules = field(default_factory=AlertRules)
 
     @classmethod
@@ -175,5 +215,6 @@ class Settings:
             countries=rules.countries,
             email=EmailConfig.from_env(),
             whatsapp=WhatsAppConfig.from_env(),
+            call=CallConfig.from_env(),
             rules=rules,
         )

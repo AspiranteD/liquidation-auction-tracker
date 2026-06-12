@@ -10,10 +10,22 @@ from typing import Optional
 import requests
 
 from .alerts import AlertDecision
-from .config import EmailConfig, WhatsAppConfig
+from .config import CallConfig, EmailConfig, WhatsAppConfig
 from .models import Auction
 
 logger = logging.getLogger(__name__)
+
+
+def _stage_minutes(stage: str) -> Optional[int]:
+    """'t30' -> 30, 't5' -> 5; None for non-ladder stages."""
+    if stage.startswith("t") and stage[1:].isdigit():
+        return int(stage[1:])
+    return None
+
+
+def _is_last_call(stage: str) -> bool:
+    minutes = _stage_minutes(stage)
+    return minutes is not None and minutes <= 5
 
 
 def build_alert_body(auction: Auction, decision: AlertDecision) -> str:
@@ -94,7 +106,7 @@ class EmailNotifier:
         stage: str = "t30",
         minutes_left: Optional[float] = None,
     ) -> bool:
-        prefix = "[ULTIMA LLAMADA]" if stage == "t5" else "[Liquidation Alert]"
+        prefix = "[ULTIMA LLAMADA]" if _is_last_call(stage) else "[Liquidation Alert]"
         subject = (
             f"{prefix} {auction.country} {auction.lot_type} - "
             f"retail EUR {auction.retail_value:,.0f}"
@@ -119,7 +131,7 @@ def build_whatsapp_body(
     bid = f"EUR {auction.current_bid:,.0f}" if auction.current_bid else "sin puja"
     mins = f"{minutes_left:.0f}" if minutes_left is not None else "?"
 
-    if stage == "t5":
+    if _is_last_call(stage):
         header = f"🔥 ÚLTIMA LLAMADA: cierra en {mins} min"
     else:
         header = f"⏰ Cierra en {mins} min — B-Stock ({auction.country})"
@@ -206,3 +218,80 @@ class WhatsAppNotifier:
         minutes_left: Optional[float] = None,
     ) -> bool:
         return self.send(build_whatsapp_body(auction, decision, stage, minutes_left))
+
+
+def build_call_text(
+    auction: Auction, decision: AlertDecision, minutes_left: Optional[float]
+) -> str:
+    """Short Spanish TTS script (CallMeBot caps the text at 256 chars)."""
+    mins = f"{minutes_left:.0f}" if minutes_left is not None else "pocos"
+    parts = [
+        f"Atención. Subasta a punto de cerrar en {mins} minutos.",
+        f"{auction.lot_type or 'Lote'} con retail de "
+        f"{(auction.retail_value or 0):.0f} euros.",
+    ]
+    if auction.current_bid:
+        parts.append(f"Puja actual {auction.current_bid:.0f} euros.")
+    if decision.current_total_pct is not None:
+        parts.append(
+            f"Coste total {decision.current_total_pct * 100:.0f} por ciento."
+        )
+    if decision.breakdown:
+        parts.append(f"Máximo recomendado {decision.breakdown.bid:.0f} euros.")
+    return " ".join(parts)[:256]
+
+
+class CallNotifier:
+    """Voice-call escalation via CallMeBot's free Telegram call API.
+
+    Rings the user on Telegram and reads the alert with a TTS voice. Needs
+    a one-time authorization: send /start to @CallMeBot_txtbot on Telegram.
+    """
+
+    API_URL = "http://api.callmebot.com/start.php"
+
+    def __init__(self, config: CallConfig, timeout: int = 60) -> None:
+        self.config = config
+        self.timeout = timeout
+
+    def call(self, text: str) -> bool:
+        cfg = self.config
+        if not cfg.enabled:
+            logger.info("Call alerts disabled; skipping call.")
+            return False
+        if not cfg.telegram_user:
+            logger.warning("Call config incomplete (no Telegram user); cannot call.")
+            return False
+
+        try:
+            response = requests.get(
+                self.API_URL,
+                params={
+                    "user": cfg.telegram_user,
+                    "text": text[:256],
+                    "lang": cfg.lang,
+                    "rpt": cfg.repeats,
+                },
+                timeout=self.timeout,
+            )
+        except requests.RequestException as exc:
+            logger.error("Failed to place call: %s", exc)
+            return False
+
+        if response.status_code >= 400:
+            logger.error(
+                "CallMeBot call rejected (HTTP %s): %s",
+                response.status_code,
+                (response.text or "")[:200],
+            )
+            return False
+        logger.info("Call placed to %s", cfg.telegram_user)
+        return True
+
+    def call_auction_alert(
+        self,
+        auction: Auction,
+        decision: AlertDecision,
+        minutes_left: Optional[float] = None,
+    ) -> bool:
+        return self.call(build_call_text(auction, decision, minutes_left))
