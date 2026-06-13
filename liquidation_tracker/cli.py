@@ -241,8 +241,12 @@ def cmd_watch(args: argparse.Namespace) -> int:
             if notifier.send(reports.build_whatsapp_lot_summary(report)):
                 sent += 1
     new = sum(1 for r in results if r.insights and r.is_new)
+    over = sum(1 for r in results if r.decision and r.decision.over_limit)
     failed = sum(1 for r in results if r.error)
-    print(f"Nuevos lotes analizados: {new} (WhatsApp enviados: {sent}, fallos: {failed})")
+    print(
+        f"Nuevos lotes clave: {new} (WhatsApp: {sent}) · "
+        f"{over} excluidos por precio · {failed} sin manifiesto"
+    )
     return 0
 
 
@@ -256,8 +260,12 @@ def cmd_digest(args: argparse.Namespace) -> int:
         print(f"No se pudo escanear B-Stock: {exc}", file=sys.stderr)
         return 2
 
-    if not results:
-        print("Sin subastas activas; no se genera digest.")
+    analyzed = [r for r in results if r.insights]
+    over = [r for r in results if r.decision and r.decision.over_limit]
+    failed = [r for r in results if r.error]
+
+    if not analyzed and not over and not failed:
+        print("Sin lotes clave ahora mismo; no se envía digest.")
         return 0
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M")
@@ -265,25 +273,40 @@ def cmd_digest(args: argparse.Namespace) -> int:
     reports.build_digest_pdf(results, pdf_path)
     print(f"Digest PDF: {pdf_path}")
 
-    analyzed = [r for r in results if r.insights]
-    body_lines = [f"Informe de pallets B-Stock ({len(analyzed)} lotes analizados):", ""]
+    # Email body leads with the verdict so it's scannable without opening
+    # the PDF; the lots are already ranked (interesting first).
+    analyzed.sort(key=lambda r: reports._VERDICT_RANK.get(reports.lot_verdict(r)[0], 9))
+    body_lines = [
+        f"Lotes clave dentro de tu límite: {len(analyzed)} "
+        f"({len(over)} excluidos por precio, {len(failed)} sin manifiesto).",
+        "",
+    ]
     for r in analyzed:
+        level, label, _ = reports.lot_verdict(r)
         hidden = r.insights.giveaway_value_sure + r.insights.giveaway_value_doubt
         body_lines.append(
-            f"- #{r.auction.auction_id} {r.auction.lot_type or '?'}: retail "
-            f"{r.insights.total_retail:,.0f} EUR, efectivo "
-            f"{r.insights.effective_retail:,.0f} EUR, "
-            f"{len(r.insights.giveaways)} regalados (~{hidden:,.0f} EUR ocultos) "
-            f"— {r.auction.url}"
+            f"{level} #{r.auction.auction_id} {r.auction.lot_type or '?'} — {label}\n"
+            f"   efectivo {r.insights.effective_retail:,.0f} EUR, "
+            f"{len(r.insights.giveaways)} regalados (~{hidden:,.0f} EUR ocultos). "
+            f"{reports.price_status(r)}\n"
+            f"   {r.auction.url}"
         )
-    failed = [r for r in results if r.error]
+    if over:
+        body_lines += ["", "Excluidos por superar tu límite de precio:"]
+        for r in over:
+            pct = (
+                f"{r.decision.current_total_pct:.0%}"
+                if r.decision.current_total_pct is not None else "?"
+            )
+            body_lines.append(f"- #{r.auction.auction_id}: coste {pct}")
     if failed:
         body_lines += ["", "Sin manifiesto:"]
         body_lines += [f"- #{r.auction.auction_id}: {r.error}" for r in failed]
 
     email = EmailNotifier(settings.email)
     sent = email.send(
-        f"Pallets B-Stock — {len(analyzed)} lotes — {datetime.now():%d/%m %H:%M}",
+        f"Lotes clave B-Stock — {len(analyzed)} dentro de límite — "
+        f"{datetime.now():%d/%m %H:%M}",
         "\n".join(body_lines),
         attachments=[pdf_path],
     )

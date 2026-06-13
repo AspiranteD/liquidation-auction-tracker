@@ -89,12 +89,27 @@ Módulo `liquidation_tracker/insights.py`. Detecta:
 
 ## 5. Informes
 
-- **Watch** (cada 15 min, 24/7): detecta subastas nuevas → analiza su
-  manifiesto → genera PDF + markdown → te manda resumen por WhatsApp.
-- **Digest** (9:00, 12:00 y 21:00): un PDF combinado de todos los lotes
-  activos, **enviado por email** con resumen en el cuerpo.
-- Cada informe abre con **"Lectura rápida"**: bullets en claro con cifras
-  ("X objetos que podrían venderse por ~Y € están declarados por Z €").
+**Solo informan de lotes CLAVE** — los que cumplen país + tipo + retail
+mínimo. El resto se descartan sin descargar siquiera el manifiesto. De los
+clave, los que ya **superan tu límite de coste** se excluyen (se cuentan,
+no se detallan). Cada lote abre con un **veredicto/semáforo**:
+
+- 🟢 **INTERESA** — hay valor oculto detectado (regalados seguros o cajas
+  enteras sin declarar).
+- 🟡 **A REVISAR / NORMAL** — posible valor por verificar, o sin upside
+  especial.
+- 🔴 **FLOJO** — demasiadas TVs (pérdida) o ya supera tu límite.
+
+Y un **estado de precio honesto**: lejos del cierre la puja es PROVISIONAL
+(las subastas abren con puja baja, así que al principio todo parece barato);
+la evaluación fiable del precio es **~30 min antes de cerrar**.
+
+- **Watch** (cada 15 min, 24/7): detecta lotes clave nuevos → analiza su
+  manifiesto → resumen por WhatsApp liderado por el veredicto.
+- **Digest** (9:00, 12:00 y 21:00): PDF combinado de los lotes clave
+  **dentro de límite**, ranqueado (lo más interesante primero), por email.
+- Tras el veredicto, cada informe trae la **"Lectura rápida"**: bullets en
+  claro con cifras ("X objetos que podrían venderse por ~Y €...").
 - **Estudio de camiones propios**: `scripts/estudio_nuestros.py` (analiza
   los manifiestos de la carpeta MEGA + los exportados de la BBDD) y
   `scripts/render_estudio_pdf.py` (PDF ejecutivo con portada dashboard:

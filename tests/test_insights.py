@@ -171,6 +171,56 @@ def test_soundbar_is_not_a_tv():
     assert insights.find_tvs(items) == []
 
 
+def test_stylus_for_ipad_not_flagged():
+    items = [_item(
+        description="lápiz iPad 1.7mm Precisión, 4 Puntas de Repuesto para iPad Air",
+        unit_retail=6.0)]
+    assert insights.find_giveaways(items) == []
+
+
+def test_usb_drive_with_long_compat_list_not_flagged():
+    items = [_item(
+        description=("Integral 64GB USB 3.2 Flash-Laufwerk - Kompatibel mit PC, "
+                     "Laptop, Smartphones, iPhone 15/16, MacBook Pro/Air und iPad"),
+        unit_retail=15.0)]
+    assert insights.find_giveaways(items) == []
+
+
+def test_gopro_mount_not_flagged():
+    items = [_item(
+        description="GoPro Surf Mounts - Soporte para videocámaras GoPro Hero",
+        unit_retail=20.0)]
+    assert insights.find_giveaways(items) == []
+
+
+def test_dutch_iphone_case_not_flagged():
+    items = [_item(
+        description="Apple TechWoven hoesje met MagSafe voor iPhone 17 Pro - Zwart",
+        unit_retail=69.0)]
+    assert insights.find_giveaways(items) == []
+
+
+def test_gaming_headset_named_alpha_not_a_camera():
+    items = [_item(
+        description="HyperX Cloud Alpha - Cascos de Gaming con cable trenzado",
+        unit_retail=93.0)]
+    assert insights.find_giveaways(items) == []
+
+
+def test_real_nikon_lens_still_flagged():
+    items = [_item(description="NIKON Objectif AF-S 85mm f/1.4 G", unit_retail=23.0)]
+    found = insights.find_giveaways(items)
+    assert len(found) == 1
+
+
+def test_real_dji_mic_still_flagged():
+    items = [_item(
+        description="dji Mic Mini Transmisor (Arctic White), superligero",
+        unit_retail=33.0)]
+    found = insights.find_giveaways(items)
+    assert len(found) == 1
+
+
 def test_compatibility_mention_not_flagged():
     items = [
         _item(description="Lápiz de Repuesto para Samsung Galaxy S25 Ultra", unit_retail=17.0),

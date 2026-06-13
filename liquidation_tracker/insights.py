@@ -111,12 +111,19 @@ PREMIUM_PRODUCTS: Dict[str, float] = {
     r"\bgopro\b": 150.0,
     r"dji\s?mic": 89.0,   # before the brand pattern: mics are cheaper
     r"\bdji\b": 150.0,
-    # Camera bodies and lenses ("objetivos")
-    r"\b(?:eos|alpha|a[67]\s?(?:iii|iv|r)|nikon\s?z|lumix\s?(?:s|gh))\b": 300.0,
+    # Camera bodies and lenses ("objetivos"). "alpha" only with Sony context:
+    # bare "Alpha" matches gaming headsets ("HyperX Cloud Alpha").
+    r"\b(?:eos|nikon\s?z|lumix\s?(?:s|gh))\b": 300.0,
+    r"sony\b.*\balpha\b|\ba[67]\s?(?:iii|iv|r)\b": 300.0,
     r"\b(?:sigma|tamron)\b.*\bmm\b": 200.0,
     r"\bobjetivo\b.*\bmm\b": 150.0,
     r"\b(?:canon|nikon|sony)\b.*\b(?:[0-9]{2,3}\s?mm|f/[0-9.]+)": 200.0,
 }
+
+# Bare-brand patterns (action cams, drones, vacuums) sit in a sea of cheap
+# branded accessories. For these, ANY accessory word in the line — wherever
+# it sits — means it's a GoPro mount / DJI case, not the device itself.
+_BRAND_ONLY = {r"\bdyson\b", r"\bgopro\b", r"dji\s?mic", r"\bdji\b"}
 
 # Patterns that name a standalone DEVICE (console, phone, computer, GPU).
 # A peripheral that merely lists them as compatible platforms ("auriculares
@@ -151,7 +158,8 @@ PERIPHERAL_WORDS = [
 # Words that mean the line is an accessory FOR a premium product / TV, not
 # the product itself. Spanish, English, German, French, Italian.
 ACCESSORY_WORDS = [
-    "funda", "case", "carcasa", "cover", "hülle", "huelle", "coque", "custodia",
+    "funda", "case", "carcasa", "cover", "hülle", "huelle", "hoesje",
+    "coque", "custodia",
     "protector", "cristal", "glass", "vidrio", "panzerglas", "film", "folie",
     "pelicula", "película", "screen protector",
     "cable", "kabel", "câble", "cavo", "cargador", "charger", "ladegerät",
@@ -166,7 +174,11 @@ ACCESSORY_WORDS = [
     "convertidor", "converter", "splitter",
     "mando", "remote", "fernbedienung", "télécommande", "telecomando",
     "correa", "strap", "armband", "pulsera", "bracelet", "cinturino", "band",
-    "stylus", "pencil tip", "skin", "sticker", "vinilo",
+    "stylus", "lápiz", "lapiz", "pencil", "punta", "puntas",
+    "pen tip", "skin", "sticker", "vinilo",
+    "pendrive", "pen drive", "usb-stick", "usb stick", "flash drive",
+    "flash-laufwerk", "memoria usb", "memory card", "tarjeta de memoria",
+    "microsd", "micro sd",
     "antena", "antenna", "antenne",
     "teclado para", "keyboard for", "tastatur für",
     "bateria para", "batería para", "battery for", "akku für",
@@ -209,15 +221,19 @@ _SOUNDBAR_RE = re.compile(r"barra\s+de\s+sonido|sound\s?bar", re.IGNORECASE)
 
 AMAZON_URL = "https://www.amazon.es/dp/{asin}"
 
-# "para Samsung Galaxy S25", "compatible con MacBook", "für iPhone 15 Pro
-# Samsung Galaxy"... — the premium keyword names what the item works WITH,
-# not what it is. Compatibility lists run long, so allow several tokens
-# (with commas) between the preposition and the match.
+# "para Samsung Galaxy S25", "compatible con MacBook", "Kompatibel mit PC,
+# Laptop, Smartphones, iPhone 15/16, MacBook"... — the premium keyword names
+# what the item works WITH, not what it is. Compatibility lists run long
+# (many comma-separated platforms), so allow many tokens between the
+# preposition and the match.
 _COMPATIBILITY_RE = re.compile(
     r"(?:\bpara|\bfor|\bcompatible[s]?(?:\s+(?:con|with))?|\bkompatibel(?:\s+mit)?|"
-    r"\bfür|\bfuer|\bpour|\bper|\badatto|\bzum|\bvon)\s+(?:[\w./+,-]+\s+){0,6}$",
+    r"\bfür|\bfuer|\bpour|\bper|\badatto|\bzum|\bvon|\bvoor)\s+"
+    r"(?:[\w./+,&-]+[\s,]+){0,10}$",
     re.IGNORECASE,
 )
+# Compatibility lists can be long; look back far enough to catch the lead-in.
+_COMPAT_LOOKBACK = 120
 
 
 def _has_accessory_word(text: str) -> bool:
@@ -245,7 +261,7 @@ def _word_before(text: str, words: List[str], match_start: int) -> bool:
 
 def _is_compatibility_mention(desc: str, match_start: int) -> bool:
     """True when the premium keyword is preceded by a compatibility phrase."""
-    prefix = desc[max(0, match_start - 45):match_start]
+    prefix = desc[max(0, match_start - _COMPAT_LOOKBACK):match_start]
     return bool(_COMPATIBILITY_RE.search(prefix))
 
 
@@ -480,6 +496,10 @@ def find_giveaways(
                 # accessory ("Funda para iPhone", "Auriculares ... PS5"),
                 # after it is just specs ("iPhone 16 128GB de memoria").
                 if _word_before(desc, ACCESSORY_WORDS, match.start()):
+                    continue
+                # Bare brands lead with the brand name, so position can't
+                # tell device from accessory: any accessory word vetoes.
+                if pattern in _BRAND_ONLY and _has_accessory_word(desc):
                     continue
                 if pattern in DEVICE_PATTERNS and _word_before(
                     desc, PERIPHERAL_WORDS, match.start()

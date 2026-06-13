@@ -49,6 +49,15 @@ class AlertDecision:
     threshold_pct: float = 0.0
     current_total_pct: Optional[float] = None
     very_good: bool = False
+    # ``static_ok``: passes the filters that DON'T change during the auction
+    # (country, lot family, retail minimum, pieces). ``over_limit``: the
+    # current bid already implies a landed cost above the ceiling. A key lot
+    # is exactly static_ok AND not over_limit. Reports include static_ok
+    # lots and drop over_limit ones, because at the start every auction sits
+    # well under the ceiling (initial bids are low) and only the price near
+    # close — 30 min out — separates the real buys.
+    static_ok: bool = False
+    over_limit: bool = False
 
 
 def evaluate(
@@ -60,7 +69,9 @@ def evaluate(
     (no bid yet counts as bid 0). The suggested max bid in ``breakdown`` is
     computed against the applicable ceiling (12% normal / 15% electronics).
     """
-    reasons: List[str] = []
+    # Static filters (country, lot family, retail minimum, pieces) don't
+    # change during the auction; the price filter does. Keep them apart.
+    static_reasons: List[str] = []
 
     family = lot_family(auction.lot_type)
     electronics = is_electronics(auction, rules)
@@ -75,28 +86,29 @@ def evaluate(
         )
 
     if rules.countries and auction.country not in rules.countries:
-        reasons.append(f"country {auction.country} not in monitor list")
+        static_reasons.append(f"country {auction.country} not in monitor list")
 
     if family is None:
-        reasons.append(f"lot type {auction.lot_type!r} not monitored")
+        static_reasons.append(f"lot type {auction.lot_type!r} not monitored")
 
     if auction.retail_value is None:
-        reasons.append("retail value unknown")
+        static_reasons.append("retail value unknown")
     elif family is not None:
         min_retail = rules.min_retail_by_type.get(family)
         if min_retail is None:
-            reasons.append(f"no retail minimum configured for {family}")
+            static_reasons.append(f"no retail minimum configured for {family}")
         elif auction.retail_value < min_retail:
-            reasons.append(
+            static_reasons.append(
                 f"retail {auction.retail_value:,.0f} below min "
                 f"{min_retail:,.0f} for {family}"
             )
 
     if auction.pieces is not None and auction.pieces < rules.min_pieces:
-        reasons.append(f"pieces {auction.pieces} below min {rules.min_pieces}")
+        static_reasons.append(f"pieces {auction.pieces} below min {rules.min_pieces}")
 
-    # Total landed cost implied by the current bid (the deciding rule).
+    # Total landed cost implied by the current bid (the price filter).
     current_total_pct: Optional[float] = None
+    price_reason: Optional[str] = None
     if auction.retail_value and family:
         current = calculator.cost_breakdown_for_bid(
             auction.current_bid or 0.0,
@@ -105,12 +117,15 @@ def evaluate(
         )
         current_total_pct = current.total_pct_of_retail
         if current_total_pct is not None and current_total_pct > threshold:
-            reasons.append(
+            price_reason = (
                 f"current bid implies {current_total_pct:.1%} of retail "
                 f"(> {threshold:.0%}{' electronics' if electronics else ''})"
             )
 
-    is_key = not reasons
+    static_ok = not static_reasons
+    over_limit = price_reason is not None
+    reasons = static_reasons + ([price_reason] if price_reason else [])
+    is_key = static_ok and not over_limit
     very_good = bool(
         is_key
         and current_total_pct is not None
@@ -124,4 +139,6 @@ def evaluate(
         threshold_pct=threshold,
         current_total_pct=current_total_pct,
         very_good=very_good,
+        static_ok=static_ok,
+        over_limit=over_limit,
     )
