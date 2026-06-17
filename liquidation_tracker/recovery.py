@@ -205,10 +205,16 @@ class GroupAggregate:
     retail: float
 
 
+# Countries with a specific "4 Pallets <C>" transport rate in the calculator's
+# table; everything else (ES, FR, UK...) uses the base "4 Pallets" rate.
+_PALLET_TRANSPORT_COUNTRIES = ("DE", "PL", "IT")
+
+
 def transport_key(lot_type: Optional[str], country: Optional[str]) -> str:
     """Transport for "4 Pallets" depends on the destination country; truckloads
-    don't. Mirrors the recomendador's lot_key convention."""
-    if lot_type == "4 Pallets" and country:
+    don't. Only DE/PL/IT have a specific rate — ES/FR/UK fall back to the base
+    "4 Pallets" key (otherwise the lookup misses and transport is treated as 0)."""
+    if lot_type == "4 Pallets" and country in _PALLET_TRANSPORT_COUNTRIES:
         return f"4 Pallets {country}"
     return lot_type or ""
 
