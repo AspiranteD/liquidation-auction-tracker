@@ -141,20 +141,17 @@ def build_whatsapp_body(
         header,
         f"{auction.lot_type or 'Lote'} — retail {retail}, {auction.pieces or '?'} uds",
     ]
-    if decision.current_total_pct is not None:
+    if decision.current_bid_pct is not None:
         lines.append(
-            f"Puja actual: {bid} → coste total {decision.current_total_pct:.1%} del retail"
+            f"Puja actual: {bid} → coste total {decision.current_bid_pct:.1%} del retail"
         )
     else:
         lines.append(f"Puja actual: {bid}")
-    threshold_note = (
-        f"umbral {decision.threshold_pct:.0%}"
-        + (" (electrónica)" if decision.electronics else "")
-    )
-    if b:
+    if decision.recommended_bid:
         lines.append(
-            f"Puja máx para {threshold_note}: EUR {b.bid:,.0f} "
-            f"(coste total EUR {b.total_cost:,.0f})"
+            f"Puja máx recomendada (recuperación {decision.recovery:.0%}/"
+            f"caja×3): EUR {decision.recommended_bid:,.0f}"
+            + (f" (coste total EUR {b.total_cost:,.0f})" if b else "")
         )
     if auction.end_time:
         lines.append(f"Cierra: {auction.end_time:%d/%m %H:%M}")
@@ -233,12 +230,11 @@ def build_call_text(
     ]
     if auction.current_bid:
         parts.append(f"Puja actual {auction.current_bid:.0f} euros.")
-    if decision.current_total_pct is not None:
+    if decision.recommended_bid:
         parts.append(
-            f"Coste total {decision.current_total_pct * 100:.0f} por ciento."
+            f"Máximo recomendado {decision.recommended_bid:.0f} euros "
+            f"(recuperación {decision.recovery * 100:.0f} por ciento)."
         )
-    if decision.breakdown:
-        parts.append(f"Máximo recomendado {decision.breakdown.bid:.0f} euros.")
     return " ".join(parts)[:256]
 
 

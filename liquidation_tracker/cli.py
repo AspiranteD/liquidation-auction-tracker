@@ -30,6 +30,7 @@ from .client import BStockClient, CloudflareChallenge
 from .config import Settings
 from .notifier import EmailNotifier, WhatsAppNotifier
 from .pipeline import MonitorPipeline
+from .pricing import PriceResolver
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -141,11 +142,16 @@ def _print_insights_summary(result: insights.ManifestInsights) -> None:
     print(f"  TVs (perdida) : {result.tv_units} uds, EUR {result.tv_loss_retail:,.2f}")
     print(f"  Retail efectivo: EUR {result.effective_retail:,.2f}")
     sure = sum(1 for g in result.giveaways if g.tier == "seguro")
-    doubt = sum(1 for g in result.giveaways if g.tier == "dudoso")
+    unver = sum(1 for g in result.giveaways if g.tier == "sin_verificar")
     print(
-        f"  Regalados     : {sure} seguros ({result.giveaway_value_sure:,.0f} EUR), "
-        f"{doubt} dudosos ({result.giveaway_value_doubt:,.0f} EUR)"
+        f"  Regalados     : {sure} confirmados ({result.giveaway_value_sure:,.0f} EUR), "
+        f"{unver} sin verificar ({result.giveaway_value_unverified:,.0f} EUR)"
     )
+    print(
+        f"  Cajas regaladas: {result.gifted_box_value_point:,.0f} EUR "
+        f"(rango {result.gifted_box_value_low:,.0f}-{result.gifted_box_value_high:,.0f})"
+    )
+    print(f"  VALOR REAL est.: {result.real_retail_point:,.0f} EUR")
     print(
         f"  Contenedores  : {len(result.boxes)} cajas "
         f"({len(result.suspicious_boxes)} sospechosas), {len(result.pallets)} pallets "
@@ -162,7 +168,10 @@ def cmd_inspect(args: argparse.Namespace) -> int:
         print(f"No rows parsed from {args.csv}", file=sys.stderr)
         return 2
     stem = os.path.splitext(os.path.basename(args.csv))[0]
-    result = insights.deep_analyze(items, label=stem, verify_prices=args.verify)
+    resolver = PriceResolver() if args.verify else None
+    result = insights.deep_analyze(items, label=stem, resolver=resolver)
+    if resolver:
+        resolver.save_cache()
     _print_insights_summary(result)
     path = _write_report(insights.render_report(result), args.report_dir, stem)
     pdf_path = reports.render_pdf(
@@ -184,6 +193,7 @@ def cmd_manifests(args: argparse.Namespace) -> int:
         return 2
 
     os.makedirs(settings.manifest_dir, exist_ok=True)
+    resolver = PriceResolver() if args.verify else None
     summary_lines = [f"# Manifiestos {args.country} — resumen", ""]
     analyzed = 0
     for auction in auctions:
@@ -198,13 +208,11 @@ def cmd_manifests(args: argparse.Namespace) -> int:
             if not os.path.exists(csv_path):
                 client.download_manifest(lot_id, csv_path)
             items = analyzer.parse_manifest(csv_path)
-            result = insights.deep_analyze(
-                items, label=label, verify_prices=args.verify
-            )
+            result = insights.deep_analyze(items, label=label, resolver=resolver)
             _print_insights_summary(result)
             stem = f"{auction.auction_id}_{lot_id}"
             path = _write_report(insights.render_report(result), args.report_dir, stem)
-            hidden = result.giveaway_value_sure + result.giveaway_value_doubt
+            hidden = result.hidden_value_point
             summary_lines.append(
                 f"- **#{auction.auction_id}** retail efectivo EUR "
                 f"{result.effective_retail:,.0f} (TVs -EUR {result.tv_loss_retail:,.0f}), "
@@ -216,6 +224,8 @@ def cmd_manifests(args: argparse.Namespace) -> int:
             print(f"\n=== {label} ===\n  SIN MANIFIESTO: {exc}")
             summary_lines.append(f"- **#{auction.auction_id}** sin manifiesto: {exc}")
 
+    if resolver:
+        resolver.save_cache()
     summary_path = _write_report(
         "\n".join(summary_lines) + "\n", args.report_dir, f"resumen_{args.country}"
     )
@@ -283,22 +293,22 @@ def cmd_digest(args: argparse.Namespace) -> int:
     ]
     for r in analyzed:
         level, label, _ = reports.lot_verdict(r)
-        hidden = r.insights.giveaway_value_sure + r.insights.giveaway_value_doubt
+        bid = reports._bid_line(r)
         body_lines.append(
             f"{level} #{r.auction.auction_id} {r.auction.lot_type or '?'} — {label}\n"
-            f"   efectivo {r.insights.effective_retail:,.0f} EUR, "
-            f"{len(r.insights.giveaways)} regalados (~{hidden:,.0f} EUR ocultos). "
-            f"{reports.price_status(r)}\n"
+            f"   REAL estimado {r.insights.real_retail_point:,.0f} EUR "
+            f"(declarado {r.insights.total_retail:,.0f}). {reports.price_status(r)}\n"
+            f"   {bid}\n"
             f"   {r.auction.url}"
         )
     if over:
-        body_lines += ["", "Excluidos por superar tu límite de precio:"]
+        body_lines += ["", "Excluidos por superar tu máximo recomendado:"]
         for r in over:
-            pct = (
-                f"{r.decision.current_total_pct:.0%}"
-                if r.decision.current_total_pct is not None else "?"
+            body_lines.append(
+                f"- #{r.auction.auction_id}: puja "
+                f"{r.auction.current_bid or 0:,.0f} > máx "
+                f"{r.decision.recommended_bid:,.0f} EUR"
             )
-            body_lines.append(f"- #{r.auction.auction_id}: coste {pct}")
     if failed:
         body_lines += ["", "Sin manifiesto:"]
         body_lines += [f"- #{r.auction.auction_id}: {r.error}" for r in failed]

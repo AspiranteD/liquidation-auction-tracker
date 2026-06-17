@@ -21,14 +21,16 @@ def _item(**overrides) -> ManifestItem:
 
 # --- TVs ---------------------------------------------------------------
 
-def test_tv_detected_by_size_and_keyword():
-    items = [_item(description='Samsung Smart TV 55" Crystal UHD 4K', unit_retail=550.0)]
+def test_tv_detected_by_category_televisions():
+    items = [_item(description='Samsung Smart TV 55" Crystal UHD 4K',
+                   category="Televisions", subcategory="TVs 51\"-60\"",
+                   unit_retail=550.0)]
     tvs = insights.find_tvs(items)
     assert len(tvs) == 1
     assert tvs[0].confidence == "seguro"
 
 
-def test_tv_detected_by_category():
+def test_tv_detected_by_subcategory():
     items = [
         _item(
             description="Modelo X100",
@@ -38,6 +40,21 @@ def test_tv_detected_by_category():
         )
     ]
     assert insights.find_tvs(items)[0].confidence == "seguro"
+
+
+def test_tv_by_description_only_not_counted():
+    # The manifest taxonomy is the only signal: a TV-looking description in a
+    # non-Televisions category is NOT a TV (could be a projector/monitor).
+    items = [_item(description='Samsung Smart TV 55" Crystal UHD 4K',
+                   category="Home", subcategory="Misc", unit_retail=550.0)]
+    assert insights.find_tvs(items) == []
+
+
+def test_projector_not_a_tv():
+    items = [_item(description="Epson Lifestudio proyector portátil 1080p",
+                   category="Home Theater Projectors",
+                   subcategory="Projectors", unit_retail=765.0)]
+    assert insights.find_tvs(items) == []
 
 
 def test_tv_accessory_not_counted():
@@ -51,7 +68,8 @@ def test_tv_accessory_not_counted():
 
 def test_tv_loss_subtracted_from_effective_retail():
     items = [
-        _item(description='LG OLED TV 65" C3', unit_retail=1500.0),
+        _item(description='LG OLED TV 65" C3', category="Televisions",
+              subcategory='TVs 61"-69"', unit_retail=1500.0),
         _item(description="Taladro inalambrico", unit_retail=100.0),
     ]
     result = insights.deep_analyze(items)
@@ -69,11 +87,13 @@ def test_iphone_at_12_eur_is_sure_giveaway():
     assert "amazon.es" in found[0].amazon_url
 
 
-def test_macbook_at_150_eur_is_doubtful():
+def test_macbook_at_150_eur_unverified_without_resolver():
+    # 150 / 600 typical = 25%: a suspect, but without a resolver we cannot
+    # confirm it -> reported "sin_verificar" (no longer "dudoso").
     items = [_item(description="Apple MacBook Air M3 13in", unit_retail=150.0)]
     found = insights.find_giveaways(items)
     assert len(found) == 1
-    assert found[0].tier == "dudoso"
+    assert found[0].tier == "sin_verificar"
 
 
 def test_iphone_case_is_not_a_giveaway():
@@ -150,12 +170,14 @@ def test_premium_declared_at_zero_is_flagged():
     assert found[0].tier == "seguro"
 
 
-def test_tv_mentioning_remote_or_chromecast_detected():
-    # Real panels list extras after the name; they must not be skipped.
+def test_televisions_category_detected_regardless_of_description():
+    # Panels are detected by taxonomy; extras in the description are irrelevant.
     items = [
-        _item(description='Samsung QLED 4K 75Q60T Smart TV de 75" One Remote Control',
+        _item(description='Samsung QLED 4K 75Q60T One Remote Control',
+              category="Televisions", subcategory='TVs 70" and Larger',
               unit_retail=2032.0),
-        _item(description='TCL 65V6C Smart TV 65" 4K HDR Chromecast Built-in',
+        _item(description='TCL 65V6C Chromecast Built-in',
+              category="Televisions", subcategory='TVs 61"-69"',
               unit_retail=696.0),
     ]
     tvs = insights.find_tvs(items)
@@ -230,17 +252,18 @@ def test_compatibility_mention_not_flagged():
     assert insights.find_giveaways(items) == []
 
 
-def test_cheap_tv_lookalike_downgraded_to_posible():
+def test_cheap_tv_lookalike_not_detected():
     items = [
         _item(description="Convertidor HDMI 4K a 30Hz para TV", unit_retail=24.0),
         _item(description="Supporto TV a Parete Fisso 55 pollici", unit_retail=18.0),
     ]
-    tvs = insights.find_tvs(items)
-    assert not any(t.confidence == "seguro" for t in tvs)
+    assert insights.find_tvs(items) == []
 
 
-def test_real_tv_above_floor_is_sure():
-    items = [_item(description='Hisense 55A6N UHD 4K Smart TV 55 Pulgadas', unit_retail=489.0)]
+def test_real_tv_in_televisions_category_is_sure():
+    items = [_item(description='Hisense 55A6N UHD 4K Smart TV 55 Pulgadas',
+                   category="Televisions", subcategory='TVs 51"-60"',
+                   unit_retail=489.0)]
     tvs = insights.find_tvs(items)
     assert tvs[0].confidence == "seguro"
 
@@ -261,6 +284,8 @@ def test_tv_accessory_category_not_sure_tv():
 
 
 def test_same_asin_price_disparity_flags_cheap_line():
+    # The manifest itself proves it: same ASIN at 300 and 12 -> the 12 line is
+    # self-verified as a giveaway (reference = the dear line).
     items = [
         _item(description="Robot aspirador X", asin="B0DUPE", unit_retail=300.0),
         _item(description="Robot aspirador X", asin="B0DUPE", unit_retail=12.0),
@@ -268,7 +293,8 @@ def test_same_asin_price_disparity_flags_cheap_line():
     found = insights.find_giveaways(items)
     assert len(found) == 1
     assert found[0].item.unit_retail == 12.0
-    assert found[0].tier == "dudoso"
+    assert found[0].tier == "seguro"
+    assert found[0].verified is True
 
 
 # --- Containers ---------------------------------------------------------
@@ -311,6 +337,26 @@ def test_box_pallet_with_missing_boxes_flagged_as_gifted():
     assert pallets[0].missing_boxes == 3
     assert "3 de 6" in pallets[0].reason
     assert "REGALADAS" in pallets[0].reason
+
+
+def test_missing_box_value_estimate_with_range():
+    # Three boxes of 40 units at 25 EUR/unit = 1000 EUR each. 3 boxes missing
+    # -> point estimate 3*1000 = 3000, range from the cheapest to dearest box.
+    items = _box_pallet("P1", {"B1": 40, "B2": 40, "B3": 40})  # 25 EUR/unit
+    _, pallets = insights.analyze_containers(items)
+    p = pallets[0]
+    assert p.missing_boxes == 3
+    assert abs(p.missing_value_point - 3000.0) < 1e-6
+    # All declared boxes equal -> low == high == point.
+    assert p.missing_value_low == p.missing_value_high == p.missing_value_point
+
+
+def test_gifted_box_value_totalled_on_insights():
+    items = _box_pallet("P1", {"B1": 40, "B2": 40})  # two 1000-EUR boxes, 4 missing
+    result = insights.deep_analyze(items)
+    assert result.gifted_box_value_point == 4 * 1000.0
+    # Real value point = declared + hidden (gifted boxes here, no giveaways).
+    assert result.real_retail_point == result.total_retail + result.gifted_box_value_point
 
 
 def test_sparse_but_heavy_box_is_bulky_not_suspicious():
@@ -414,14 +460,14 @@ def test_breakdown_by_department():
 
 def test_giveaway_value_estimation():
     items = [
-        # iPhone declared at 10, typical 250 -> hidden 240 (sure)
+        # iPhone declared at 10, typical 250 -> hidden 240 (extreme -> sure)
         _item(description="Apple iPhone 16 128GB", unit_retail=10.0),
-        # MacBook declared at 150, typical 600 -> hidden 450 (doubtful)
+        # MacBook declared at 150, typical 600 -> hidden 450 (sin verificar)
         _item(description="Apple MacBook Air M3", unit_retail=150.0, asin="B0MB"),
     ]
     result = insights.deep_analyze(items)
     assert result.giveaway_value_sure == 240.0
-    assert result.giveaway_value_doubt == 450.0
+    assert result.giveaway_value_unverified == 450.0
 
 
 def test_giveaway_evidence_in_report():

@@ -123,14 +123,17 @@ class CallConfig:
 class AlertRules:
     """Thresholds that decide whether an auction is 'key' and worth an alert.
 
-    The percentage ceilings apply to the TOTAL landed cost (bid + transport +
-    VAT + B-Stock fee + RE) as a fraction of retail — the bid itself typically
-    ends up around 5-10% of retail when the total lands at 12%.
+    No more fixed percentage ceilings: the recommended bid is derived from the
+    macro recovery study (recovery / ``bid_multiple`` of retail). An auction is
+    over the limit when its current bid exceeds that recommended bid.
     """
 
-    max_total_cost_pct: float = 0.12               # ceiling for any lot
-    electronics_max_total_pct: float = 0.15        # ceiling when the lot has electronics
-    very_good_total_pct: float = 0.10              # <= this triggers the last-call reminder
+    # Target gross markup: recommended landed cost = recovery / bid_multiple of
+    # retail (a 3x box multiple). Replaces the old 12%/15% rules.
+    bid_multiple: float = 3.0
+    # The lot is a "very good" last-call when its current bid is at or below
+    # this fraction of the recommended bid (lots of headroom left).
+    very_good_headroom_fraction: float = 0.5
 
     # Minimum retail value (EUR) per lot family. Families not listed here are
     # never alerted.
@@ -167,14 +170,9 @@ class AlertRules:
     def from_env(cls) -> "AlertRules":
         defaults = cls()
         return cls(
-            max_total_cost_pct=_get_float(
-                "ALERT_MAX_TOTAL_PCT", defaults.max_total_cost_pct
-            ),
-            electronics_max_total_pct=_get_float(
-                "ALERT_ELECTRONICS_MAX_TOTAL_PCT", defaults.electronics_max_total_pct
-            ),
-            very_good_total_pct=_get_float(
-                "ALERT_VERY_GOOD_TOTAL_PCT", defaults.very_good_total_pct
+            bid_multiple=_get_float("ALERT_BID_MULTIPLE", defaults.bid_multiple),
+            very_good_headroom_fraction=_get_float(
+                "ALERT_VERY_GOOD_HEADROOM", defaults.very_good_headroom_fraction
             ),
             min_retail_by_type={
                 "4 Pallets": _get_float("ALERT_MIN_RETAIL_4_PALLETS", 20000.0),

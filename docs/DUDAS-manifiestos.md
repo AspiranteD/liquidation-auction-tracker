@@ -1,5 +1,35 @@
 # Análisis de manifiestos — dudas y decisiones pendientes
 
+> ## ACTUALIZACIÓN 17/06/2026 — refactor según feedback (102 tests en verde)
+>
+> Cinco cambios pedidos, ya implementados:
+>
+> 1. **La columna `condition` ya NO afecta a la valoración.** Se mantiene como
+>    dato (desglose por condición en el informe), pero nada deriva valor de
+>    ella. Resuelve el punto 7.
+> 2. **Adiós "dudosos": ahora se verifican.** `liquidation_tracker/pricing.py`
+>    resuelve el precio real de cada sospechoso en orden **BD Reusalia →
+>    caché → scraping Amazon** (scraper extraído del backend, standalone). Si
+>    el declarado < 40% del precio real → regalado CONFIRMADO; si ≈ real → se
+>    descarta (falso positivo). Lo que no se puede verificar online queda en un
+>    bucket aparte "sin verificar" (no contamina el valor). Resuelve puntos 4 y 5.
+> 3. **TV = solo taxonomía.** Es TV (pérdida) únicamente si la categoría es
+>    "Televisions" o la subcategoría contiene "TVs <pulgadas>". Proyectores y
+>    monitores ya NO son pérdida. Resuelve punto 6.
+> 4. **Cajas regaladas con rango (lo prioritario).** Por cada pallet de cajas
+>    incompleto se estima el valor de las cajas que faltan = media de las cajas
+>    declaradas del pallet, con rango [caja más barata, caja más cara]. El "6
+>    cajas por pallet" está validado en 217 pallets históricos (máx=moda=6).
+> 5. **Puja por recuperación, sin reglas fijas.** Se elimina el 12%/15%. La
+>    puja recomendada hace que el coste aterrizado = recuperación/3 del retail,
+>    con la recuperación real por departamento del macro-estudio Reusalia
+>    (`data/recovery.json`, generado por `scripts/build_recovery.py`). Se dan
+>    DOS cifras: sobre retail declarado y sobre el retail REAL (con cajas
+>    regaladas + mal clasificados) — tu ventaja informativa.
+>
+> Lo que sigue abajo es el estado anterior (contexto histórico); los puntos 4,
+> 5, 6 y 7 quedan resueltos por lo de arriba.
+
 Estado: el módulo está construido, testeado (47 tests) y validado con los 5
 manifiestos reales descargables de las 8 subastas ES activas a 11/06/2026.
 Informes generados en `data/reports/`. Estas son las dudas que quedan para

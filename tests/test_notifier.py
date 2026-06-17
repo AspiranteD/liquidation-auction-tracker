@@ -26,8 +26,9 @@ def _auction() -> Auction:
 
 def _decision(auction: Auction) -> AlertDecision:
     calc = BidCalculator()
+    # Recovery 24% -> recommended landed cost = 8% of retail.
     breakdown = calc.max_bid_for_retail_pct(
-        auction.retail_value, 0.12, auction.lot_type
+        auction.retail_value, 0.24 / 3, auction.lot_type
     )
     current = calc.cost_breakdown_for_bid(
         auction.current_bid or 0.0, auction.lot_type, retail_value=auction.retail_value
@@ -36,8 +37,9 @@ def _decision(auction: Auction) -> AlertDecision:
         is_key=True,
         reasons=[],
         breakdown=breakdown,
-        threshold_pct=0.12,
-        current_total_pct=current.total_pct_of_retail,
+        recovery=0.24,
+        recommended_bid=breakdown.bid,
+        current_bid_pct=current.total_pct_of_retail,
     )
 
 
@@ -50,7 +52,7 @@ def test_whatsapp_body_contains_key_facts():
     assert "16,404" in body
     assert auction.url in body
     assert "11/06" in body
-    assert "umbral 12%" in body
+    assert "recomendada" in body
 
 
 def test_whatsapp_body_last_call():

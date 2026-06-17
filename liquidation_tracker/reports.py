@@ -9,6 +9,11 @@ Two consumers:
 - ``digest`` (CLI): runs at fixed times, bundles every active lot into a
   single PDF and emails it.
 
+The recommended bid is recovery-based (recovery.py): two figures per lot, a
+conservative one on the effective retail (declared minus broken TVs) and an
+"edge" one that adds the hidden value we detect (gifted boxes + confirmed
+misclassified items) that other bidders don't see.
+
 State (which auctions were already reported / failed recently) lives in a
 small JSON file so runs stay idempotent without touching the SQLite schema.
 """
@@ -30,6 +35,8 @@ from .calculator import BidCalculator
 from .client import BStockClient
 from .config import Settings
 from .models import Auction
+from .pricing import PriceResolver
+from .recovery import BidRecommendation, RecoveryModel, load_recovery
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +61,12 @@ class LotReport:
     pdf_path: Optional[str] = None
     error: Optional[str] = None
     is_new: bool = False
+    # Recovery-based bid recommendations (filled by collect_reports): the
+    # conservative one on effective retail, the "edge" one with hidden value.
+    recovery: Optional[float] = None
+    coverage: Optional[float] = None
+    bid_declared: Optional[BidRecommendation] = None
+    bid_hidden: Optional[BidRecommendation] = None
 
 
 # ---------------------------------------------------------------------------
@@ -67,32 +80,27 @@ def minutes_to_close(auction: Auction) -> Optional[float]:
 
 
 def price_status(report: "LotReport") -> str:
-    """Honest one-liner about the bid: how it stands AND whether it can be
-    trusted yet (provisional far from close, reliable near it)."""
+    """Honest one-liner about the bid: where it stands vs the recovery-based
+    recommended max, AND whether it can be trusted yet (provisional far from
+    close, reliable near it)."""
     a, d = report.auction, report.decision
     mins = minutes_to_close(a)
-    pct = (
-        f"{d.current_total_pct:.0%} del retail"
-        if d and d.current_total_pct is not None
-        else "?"
-    )
     bid = f"{a.current_bid:,.0f} EUR" if a.current_bid else "sin pujas"
-    ceiling = f"{d.threshold_pct:.0%}" if d else "12%"
+    rec = (
+        f"máx recomendada {d.recommended_bid:,.0f} EUR (recuperación {d.recovery:.0%})"
+        if d and d.recommended_bid else "máx recomendada n/a"
+    )
     if mins is None:
-        return f"Puja {bid} (coste {pct}, tu límite {ceiling})."
+        return f"Puja {bid} · {rec}."
     if mins < 0:
-        return f"Cerrada. Puja final {bid} (coste {pct})."
+        return f"Cerrada. Puja final {bid} · {rec}."
     if mins > PROVISIONAL_MINUTES:
-        hours = mins / 60.0
-        when = f"{mins:.0f} min" if mins < 90 else f"{hours:.1f} h"
+        when = f"{mins:.0f} min" if mins < 90 else f"{mins / 60.0:.1f} h"
         return (
-            f"Puja {bid} (coste {pct}) — PROVISIONAL: faltan {when} y subirá. "
+            f"Puja {bid} · {rec} — PROVISIONAL: faltan {when} y subirá. "
             f"La evaluación real es ~30 min antes de cerrar."
         )
-    return (
-        f"Puja {bid} (coste {pct}, tu límite {ceiling}) — fiable: "
-        f"faltan {mins:.0f} min."
-    )
+    return f"Puja {bid} · {rec} — fiable: faltan {mins:.0f} min."
 
 
 def lot_verdict(report: "LotReport") -> Tuple[str, str, List[str]]:
@@ -106,40 +114,42 @@ def lot_verdict(report: "LotReport") -> Tuple[str, str, List[str]]:
     notes: List[str] = []
 
     if d is not None and d.over_limit:
-        # Shouldn't normally reach a report, but stay coherent if it does.
-        return ("🔴", "PASA — la puja ya supera tu límite", notes)
+        return ("🔴", "PASA — la puja ya supera tu máximo recomendado", notes)
 
     if r is None:
         return ("⬜", "Sin manifiesto para valorar el contenido", notes)
 
     tv_share = (r.tv_loss_retail / r.total_retail) if r.total_retail else 0.0
-    upside = r.giveaway_value_sure + r.giveaway_value_doubt
     missing_boxes = sum(p.missing_boxes for p in r.suspicious_pallets)
-    has_upside = bool(
-        r.giveaway_value_sure > 0 or missing_boxes or r.suspicious_boxes
-    )
+    hidden = r.hidden_value_point
 
     if r.giveaway_value_sure > 0:
         notes.append(
-            f"{r.giveaway_value_sure:,.0f} EUR en regalados SEGUROS "
-            f"(+{r.giveaway_value_doubt:,.0f} por verificar)"
+            f"{r.giveaway_value_sure:,.0f} EUR en regalados CONFIRMADOS"
         )
-    elif upside > 0:
-        notes.append(f"{upside:,.0f} EUR en regalados por verificar")
     if missing_boxes:
-        notes.append(f"{missing_boxes} cajas enteras probablemente regaladas")
+        notes.append(
+            f"{missing_boxes} cajas regaladas (~{r.gifted_box_value_point:,.0f} EUR, "
+            f"rango {r.gifted_box_value_low:,.0f}–{r.gifted_box_value_high:,.0f})"
+        )
+    if r.giveaway_value_unverified > 0:
+        notes.append(
+            f"{r.giveaway_value_unverified:,.0f} EUR sin verificar (revisar)"
+        )
     if r.suspicious_boxes:
         notes.append(f"{len(r.suspicious_boxes)} cajas demasiado vacías")
     if tv_share > 0.10:
         notes.append(
             f"{tv_share:.0%} del retail son TVs (pérdida: {r.tv_loss_retail:,.0f} EUR)"
         )
+    if hidden > 0:
+        notes.append(f"valor REAL estimado {r.real_retail_point:,.0f} EUR")
 
     if tv_share >= 0.30:
         return ("🔴", "FLOJO — demasiadas TVs (pérdida)", notes)
     if r.giveaway_value_sure > 0 or missing_boxes:
         return ("🟢", "INTERESA — hay valor oculto detectado", notes)
-    if has_upside:
+    if r.giveaway_value_unverified > 0 or r.suspicious_boxes:
         return ("🟡", "A REVISAR — posible valor oculto (verificar)", notes)
     return ("🟡", "NORMAL — sin upside especial", notes)
 
@@ -174,6 +184,52 @@ def _should_retry(entry: Optional[dict], now: datetime) -> bool:
     except ValueError:
         return True
     return now - last >= RETRY_FAILED_AFTER
+
+
+# ---------------------------------------------------------------------------
+# Bid recommendation (recovery-based, two figures)
+# ---------------------------------------------------------------------------
+
+def compute_bids(
+    report: LotReport,
+    recovery_model: RecoveryModel,
+    calculator: BidCalculator,
+    multiple: float = 3.0,
+) -> None:
+    """Fill report.recovery / bid_declared / bid_hidden from the manifest's
+    department mix. Conservative bid = effective retail; edge bid = effective
+    retail + the hidden value we detect (gifted boxes + confirmed giveaways)."""
+    r, a = report.insights, report.auction
+    if r is None:
+        return
+    blend = recovery_model.blended(r.by_department)
+    report.recovery = blend.recovery
+    report.coverage = blend.coverage
+    family = a.lot_type
+    base_declared = r.effective_retail
+    base_hidden = r.effective_retail + r.giveaway_value_sure + r.gifted_box_value_point
+    report.bid_declared = recovery_model.recommend_bid(
+        base_declared, blend.recovery, calculator, family,
+        country=a.country, multiple=multiple, coverage=blend.coverage,
+    )
+    report.bid_hidden = recovery_model.recommend_bid(
+        base_hidden, blend.recovery, calculator, family,
+        country=a.country, multiple=multiple, coverage=blend.coverage,
+    )
+
+
+def _bid_line(report: LotReport) -> str:
+    """One-liner with the two recommended bids."""
+    if not report.bid_declared:
+        return ""
+    decl = report.bid_declared.bid
+    line = (
+        f"Puja recomendada: {decl:,.0f} EUR (declarado, recuperación "
+        f"{(report.recovery or 0):.0%}/caja×3)"
+    )
+    if report.bid_hidden and report.bid_hidden.bid > decl + 1:
+        line += f" · {report.bid_hidden.bid:,.0f} EUR con el valor oculto"
+    return line
 
 
 # ---------------------------------------------------------------------------
@@ -217,8 +273,6 @@ def _pdf_heading(pdf: FPDF, family: str, text: str, size: int = 13) -> None:
 
 def _pdf_line(pdf: FPDF, family: str, text: str, size: int = 9) -> None:
     pdf.set_font(family, "", size)
-    # new_x: fpdf2 >= 2.8 leaves the cursor at the text's right edge by
-    # default, which starves the next multi_cell(0, ...) of width.
     pdf.multi_cell(0, 5, _safe(text, family), new_x="LMARGIN", new_y="NEXT")
 
 
@@ -231,8 +285,7 @@ def _pdf_table(
     links: Optional[List[Optional[str]]] = None,
     link_col: Optional[int] = None,
 ) -> None:
-    """Bordered table. ``links``/``link_col`` make one column clickable
-    (one URL per row, e.g. the ASIN column pointing at Amazon)."""
+    """Bordered table. ``links``/``link_col`` make one column clickable."""
     pdf.set_font(family, "B", 8)
     for header, width in zip(headers, widths):
         pdf.cell(width, 6, _safe(header, family), border=1)
@@ -240,7 +293,6 @@ def _pdf_table(
     pdf.set_font(family, "", 8)
     for row_index, row in enumerate(rows):
         for col_index, (value, width) in enumerate(zip(row, widths)):
-            # crude truncation so cells never overflow
             max_chars = max(4, int(width / 1.7))
             link = ""
             if links is not None and col_index == link_col:
@@ -283,7 +335,6 @@ def _render_lot_into(
             _pdf_line(pdf, family, f"Cierra: {auction.end_time:%d/%m/%Y %H:%M} — {auction.url}")
         pdf.ln(2)
 
-    # Verdict banner: a glance tells you whether the lot is worth it.
     if report is not None:
         level, label, _ = lot_verdict(report)
         color = _VERDICT_COLOR.get(level, (148, 163, 184))
@@ -296,6 +347,11 @@ def _render_lot_into(
         pdf.set_font(family, "", 9)
         pdf.multi_cell(0, 5, _safe(price_status(report), family),
                        new_x="LMARGIN", new_y="NEXT")
+        bid_line = _bid_line(report)
+        if bid_line:
+            pdf.multi_cell(0, 5, _safe(bid_line, family),
+                           new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(0, 0, 0)
         pdf.ln(2)
 
     _pdf_heading(pdf, family, "Lectura rápida")
@@ -304,24 +360,38 @@ def _render_lot_into(
     pdf.ln(2)
 
     _pdf_heading(pdf, family, "Resumen")
-    sure_g = sum(1 for g in result.giveaways if g.tier == "seguro")
-    doubt_g = sum(1 for g in result.giveaways if g.tier == "dudoso")
+    confirmed = sum(1 for g in result.giveaways if g.tier == "seguro")
+    unver = sum(1 for g in result.giveaways if g.tier == "sin_verificar")
     _pdf_line(
-        pdf,
-        family,
+        pdf, family,
         f"Líneas: {result.total_lines}  ·  Unidades: {result.total_units}\n"
-        f"Retail declarado: {result.total_retail:,.2f} EUR "
-        f"(media {result.avg_unit_retail:,.2f} EUR/ud)\n"
-        f"TVs (pérdida): {result.tv_units} uds, {result.tv_loss_retail:,.2f} EUR\n"
-        f"Retail efectivo (sin TVs): {result.effective_retail:,.2f} EUR\n"
-        f"Regalados: {sure_g} seguros, {doubt_g} dudosos — "
-        f"valor estimado regalado: {result.giveaway_value_sure:,.0f} EUR seguros "
-        f"+ {result.giveaway_value_doubt:,.0f} EUR dudosos\n"
-        f"Cajas demasiado vacías: {len(result.suspicious_boxes)}/{len(result.boxes)}  ·  "
-        f"Pallets con cajas de menos: "
-        f"{len(result.suspicious_pallets)}/{len(result.pallets)}",
+        f"Retail declarado: {result.total_retail:,.0f} EUR\n"
+        f"TVs (pérdida): {result.tv_units} uds, {result.tv_loss_retail:,.0f} EUR\n"
+        f"Retail efectivo (sin TVs): {result.effective_retail:,.0f} EUR\n"
+        f"Cajas regaladas estimadas: {result.gifted_box_value_point:,.0f} EUR "
+        f"(rango {result.gifted_box_value_low:,.0f}–{result.gifted_box_value_high:,.0f})\n"
+        f"Regalados: {confirmed} confirmados ({result.giveaway_value_sure:,.0f} EUR), "
+        f"{unver} sin verificar ({result.giveaway_value_unverified:,.0f} EUR)\n"
+        f"VALOR REAL ESTIMADO: {result.real_retail_point:,.0f} EUR "
+        f"(declarado + oculto {result.hidden_value_point:,.0f})",
     )
     pdf.ln(2)
+
+    # Gifted boxes first: the priority signal.
+    _pdf_heading(pdf, family, "Cajas regaladas (lo más importante)")
+    if result.suspicious_pallets:
+        _pdf_table(
+            pdf, family,
+            ["Pallet", "Cajas decl.", "Faltan", "Valor est. EUR", "Rango EUR"],
+            [[p.pallet_id, f"{p.box_count}/6", str(p.missing_boxes),
+              f"{p.missing_value_point:,.0f}",
+              f"{p.missing_value_low:,.0f}–{p.missing_value_high:,.0f}"]
+             for p in result.suspicious_pallets],
+            [40, 24, 18, 35, 50],
+        )
+    else:
+        _pdf_line(pdf, family, "Ningún pallet de cajas incompleto.")
+        pdf.ln(1)
 
     _pdf_heading(pdf, family, "Por departamento")
     _pdf_table(
@@ -332,17 +402,8 @@ def _render_lot_into(
         [70, 20, 20, 35, 25],
     )
 
-    _pdf_heading(pdf, family, "Por categoría (top 12)")
-    _pdf_table(
-        pdf, family,
-        ["Categoría", "Uds", "% uds", "Retail EUR", "% retail"],
-        [[g.name, g.units, f"{g.pct_units}%", f"{g.retail:,.0f}", f"{g.pct_retail}%"]
-         for g in result.by_category[:12]],
-        [70, 20, 20, 35, 25],
-    )
-
-    sure_tvs = [t for t in result.tvs if t.confidence == "seguro"]
-    _pdf_heading(pdf, family, "Televisores (pérdida)")
+    sure_tvs = result.tvs
+    _pdf_heading(pdf, family, "Televisores (pérdida, categoría Televisions)")
     if sure_tvs:
         _pdf_table(
             pdf, family,
@@ -351,30 +412,30 @@ def _render_lot_into(
             [150, 35],
         )
     else:
-        _pdf_line(pdf, family, "Sin televisores detectados.")
+        _pdf_line(pdf, family, "Sin televisores (categoría Televisions).")
         pdf.ln(1)
 
-    total_hidden = result.giveaway_value_sure + result.giveaway_value_doubt
     _pdf_heading(
         pdf, family,
-        f"Artículos regalados — valor estimado: {total_hidden:,.0f} EUR",
+        f"Artículos regalados — confirmados {result.giveaway_value_sure:,.0f} EUR",
     )
     if result.giveaways:
         _pdf_line(
             pdf, family,
-            f"{result.giveaway_value_sure:,.0f} EUR en seguros + "
-            f"{result.giveaway_value_doubt:,.0f} EUR en dudosos. "
-            "Oculto = valor real estimado - declarado. El ASIN enlaza a Amazon.",
+            f"{result.giveaway_value_sure:,.0f} EUR confirmados + "
+            f"{result.giveaway_value_unverified:,.0f} EUR sin verificar. "
+            "Oculto = real estimado - declarado. El ASIN enlaza a Amazon.",
             size=8,
         )
         _pdf_table(
             pdf, family,
-            ["Descripción", "Declarado", "Est. real", "Oculto", "Nivel", "ASIN"],
+            ["Descripción", "Declarado", "Real est.", "Oculto", "Estado", "ASIN"],
             [[(g.item.description or ""), f"{g.item.unit_retail:,.2f}",
-              f"{g.estimated_value:,.0f}", f"{g.hidden_value:,.0f}", g.tier,
+              f"{g.reference_price:,.0f}", f"{g.hidden_value:,.0f}",
+              "OK" if g.tier == "seguro" else "?",
               g.item.asin or "-"]
              for g in result.giveaways],
-            [85, 20, 18, 18, 16, 28],
+            [82, 20, 18, 18, 14, 33],
             links=[g.amazon_url for g in result.giveaways],
             link_col=5,
         )
@@ -382,7 +443,7 @@ def _render_lot_into(
         _pdf_line(pdf, family, "Sin regalados detectados.")
         pdf.ln(1)
 
-    _pdf_heading(pdf, family, "Cajas demasiado vacías (van siempre llenas a tope)")
+    _pdf_heading(pdf, family, "Cajas demasiado vacías")
     if result.suspicious_boxes:
         _pdf_table(
             pdf, family,
@@ -392,64 +453,8 @@ def _render_lot_into(
              for b in result.suspicious_boxes],
             [28, 15, 16, 22, 107],
         )
-        _pdf_line(
-            pdf, family,
-            "Pocos objetos solo es sospechoso si además pesan poco (pocos "
-            "objetos voluminosos también llenan la caja). El valor declarado "
-            "nunca es criterio.",
-            size=8,
-        )
-        for box in result.suspicious_boxes:
-            _pdf_heading(
-                pdf, family,
-                f"Contenido declarado de la caja {box.container_id} "
-                f"({box.units} objetos, {box.weight_kg:,.0f} kg)",
-                size=10,
-            )
-            _pdf_table(
-                pdf, family,
-                ["Artículo", "Uds", "Peso kg", "EUR", "ASIN"],
-                [[(i.description or ""), i.qty,
-                  f"{i.weight_kg:.1f}" if i.weight_kg else "?",
-                  f"{i.line_retail:,.2f}", i.asin or "-"]
-                 for i in sorted(
-                     box.items, key=lambda x: x.line_retail, reverse=True
-                 )[:15]],
-                [98, 12, 18, 22, 30],
-                links=[
-                    (insights.AMAZON_URL.format(asin=i.asin) if i.asin else None)
-                    for i in sorted(
-                        box.items, key=lambda x: x.line_retail, reverse=True
-                    )[:15]
-                ],
-                link_col=4,
-            )
     else:
         _pdf_line(pdf, family, "Ninguna caja demasiado vacía.")
-        pdf.ln(1)
-
-    _pdf_heading(pdf, family, "Pallets (clasificados)")
-    if result.pallets:
-        _pdf_table(
-            pdf, family,
-            ["Pallet", "Tipo", "Cajas", "Objetos", "Retail EUR", "Peso med. kg", "Aviso"],
-            [[p.pallet_id, p.pallet_type,
-              str(p.box_count) if p.pallet_type == "cajas" else "-",
-              p.units, f"{p.retail:,.0f}",
-              f"{p.avg_weight_kg:.1f}" if p.avg_weight_kg is not None else "?",
-              p.reason]
-             for p in result.pallets],
-            [24, 26, 13, 16, 24, 20, 65],
-        )
-        _pdf_line(
-            pdf, family,
-            "cajas = ~6 cajas de Amazon apiladas. objetos grandes = artículos "
-            "voluminosos sueltos (pocas unidades es normal, no se marca). "
-            "granel = objetos medianos sueltos.",
-            size=8,
-        )
-    else:
-        _pdf_line(pdf, family, "Sin información de pallets.")
         pdf.ln(1)
 
     _pdf_heading(pdf, family, "Top 10 artículos por valor")
@@ -479,11 +484,7 @@ _VERDICT_RANK = {"🟢": 0, "🟡": 1, "⬜": 2, "🔴": 3}
 
 
 def build_digest_pdf(reports: List[LotReport], path: str) -> str:
-    """One combined PDF: a ranked summary page plus one section per lot.
-
-    Only key, within-limit lots carry insights; over-limit and no-manifest
-    candidates are summarised but not detailed.
-    """
+    """One combined PDF: a ranked summary page plus one section per lot."""
     pdf, family = _new_pdf()
     pdf.add_page()
     _pdf_heading(
@@ -497,11 +498,9 @@ def build_digest_pdf(reports: List[LotReport], path: str) -> str:
     ]
     failed = [r for r in reports if not r.insights and r.error]
 
-    # Rank by verdict (interesting first), then by hidden value.
     def sort_key(r: LotReport):
         level, _, _ = lot_verdict(r)
-        hidden = r.insights.giveaway_value_sure + r.insights.giveaway_value_doubt
-        return (_VERDICT_RANK.get(level, 9), -hidden)
+        return (_VERDICT_RANK.get(level, 9), -r.insights.real_retail_point)
 
     analyzed.sort(key=sort_key)
 
@@ -514,7 +513,7 @@ def build_digest_pdf(reports: List[LotReport], path: str) -> str:
     _pdf_line(
         pdf, family,
         f"{len(analyzed)} lotes clave dentro de tu límite · "
-        f"{len(over_limit)} excluidos por superar el precio · "
+        f"{len(over_limit)} excluidos por precio · "
         f"{len(failed)} sin manifiesto.",
         size=9,
     )
@@ -523,32 +522,28 @@ def build_digest_pdf(reports: List[LotReport], path: str) -> str:
     if analyzed:
         _pdf_table(
             pdf, family,
-            ["", "Subasta", "Tipo", "Efectivo EUR", "Regalado EUR",
-             "Cajas susp.", "Cierra"],
+            ["", "Subasta", "Tipo", "Real est. EUR", "Cajas reg.",
+             "Puja rec.", "Cierra"],
             [[
                 lot_verdict(r)[1].split(" —")[0],
                 f"#{r.auction.auction_id}",
                 r.auction.lot_type or "?",
-                f"{r.insights.effective_retail:,.0f}",
-                f"{r.insights.giveaway_value_sure + r.insights.giveaway_value_doubt:,.0f}"
-                f" ({len(r.insights.giveaways)})",
-                f"{len(r.insights.suspicious_boxes)}/{len(r.insights.boxes)}",
+                f"{r.insights.real_retail_point:,.0f}",
+                f"{r.insights.gifted_box_value_point:,.0f}",
+                f"{r.bid_declared.bid:,.0f}" if r.bid_declared else "?",
                 f"{r.auction.end_time:%d/%m %H:%M}" if r.auction.end_time else "?",
             ] for r in analyzed],
-            [18, 20, 28, 26, 30, 20, 24],
+            [16, 20, 26, 28, 24, 24, 24],
         )
 
     if over_limit:
-        _pdf_heading(pdf, family, "Excluidos: la puja ya supera tu límite", 11)
+        _pdf_heading(pdf, family, "Excluidos: la puja ya supera tu máximo", 11)
         for r in over_limit:
-            pct = (
-                f"{r.decision.current_total_pct:.0%}"
-                if r.decision.current_total_pct is not None else "?"
-            )
             _pdf_line(
                 pdf, family,
                 f"#{r.auction.auction_id} {r.auction.lot_type or '?'} — "
-                f"coste {pct} (límite {r.decision.threshold_pct:.0%})",
+                f"puja {r.auction.current_bid or 0:,.0f} > máx "
+                f"{r.decision.recommended_bid:,.0f} EUR",
                 size=9,
             )
     if failed:
@@ -577,52 +572,46 @@ def collect_reports(
     settings: Settings,
     only_new: bool = False,
     report_dir: str = "data/reports",
+    recovery_model: Optional[RecoveryModel] = None,
+    resolver: Optional[PriceResolver] = None,
 ) -> List[LotReport]:
     """Scan active auctions and build reports for the KEY ones only.
 
-    Filtering is deliberate (the user only wants the relevant lots):
-
-    - Non-key on static grounds (wrong country/type, retail below the
-      per-type minimum) are dropped outright — no manifest downloaded.
-    - Key lots whose current bid already exceeds the cost ceiling are
-      returned WITHOUT insights (``decision.over_limit``) so callers can
-      count them as excluded but never report them as buys.
-    - Key lots within the ceiling get their manifest downloaded and
-      analysed. Far from close the price is provisional (initial bids are
-      low) — the report says so.
-
-    ``only_new`` skips auctions already reported ("done" in the state file)
-    and applies a cooldown before retrying failed ones.
+    Key lots within the recommended bid get their manifest downloaded, the
+    misclassified items verified online, and the two recovery-based bids
+    computed. ``only_new`` skips auctions already reported.
     """
     now = datetime.now()
     state = load_state()
     calculator = BidCalculator()
+    if recovery_model is None:
+        recovery_model = load_recovery()
+    if resolver is None:
+        resolver = PriceResolver()
     pdf_dir = os.path.join(report_dir, "pdf")
     results: List[LotReport] = []
 
-    # save_state runs even if the auction listing blows up mid-scan: losing
-    # the "done" marks would resend every WhatsApp summary on the next run.
     try:
         for country in settings.countries:
             auctions = client.list_auctions(country=country)
             for auction in auctions:
                 from . import alerts
 
-                decision = alerts.evaluate(auction, settings.rules, calculator)
+                decision = alerts.evaluate(
+                    auction, settings.rules, calculator, recovery_model
+                )
                 if not decision.static_ok:
                     continue  # not a candidate — drop, don't even download
 
                 report = LotReport(auction=auction, decision=decision)
                 if decision.over_limit:
-                    # Candidate but already too expensive: keep it so the
-                    # digest can say "N excluidos por precio", no manifest.
                     results.append(report)
                     continue
 
                 key = str(auction.auction_id)
                 entry = state.get(key)
                 if only_new and not _should_retry(entry, now):
-                    continue  # already reported, or failed and cooling down
+                    continue
 
                 try:
                     lot_id = auction.lot_id or client.fetch_lot_id(auction)
@@ -637,10 +626,11 @@ def collect_reports(
                     if not items:
                         raise RuntimeError("manifiesto vacío")
                     label = f"{auction.auction_id}_{lot_id}"
-                    result = insights.deep_analyze(items, label=label)
+                    result = insights.deep_analyze(items, label=label, resolver=resolver)
                     report.insights = result
                     report.csv_path = csv_path
-                    # markdown + pdf alongside each other
+                    compute_bids(report, recovery_model, calculator,
+                                 multiple=settings.rules.bid_multiple)
                     md_path = os.path.join(report_dir, f"{label}.md")
                     with open(md_path, "w", encoding="utf-8") as fh:
                         fh.write(insights.render_report(result))
@@ -665,6 +655,8 @@ def collect_reports(
                 results.append(report)
     finally:
         save_state(state)
+        if resolver is not None:
+            resolver.save_cache()
     return results
 
 
@@ -674,24 +666,22 @@ def build_whatsapp_lot_summary(report: LotReport) -> str:
     attach files; the PDF travels with the email digest)."""
     a, r = report.auction, report.insights
     level, label, notes = lot_verdict(report)
-    max_bid = (
-        f" · puja máx {report.decision.breakdown.bid:,.0f} EUR"
-        if report.decision and report.decision.breakdown
-        else ""
-    )
     lines = [
         f"{level} {label}",
         f"Lote clave #{a.auction_id} ({a.country}) — {a.lot_type or 'Lote'}",
-        f"Retail {r.total_retail:,.0f} EUR / efectivo {r.effective_retail:,.0f} EUR"
-        f"{max_bid}",
+        f"Retail declarado {r.total_retail:,.0f} EUR · REAL estimado "
+        f"{r.real_retail_point:,.0f} EUR",
         price_status(report),
     ]
+    bid_line = _bid_line(report)
+    if bid_line:
+        lines.append(bid_line)
     for note in notes:
         lines.append(f"  · {note}")
     for g in [g for g in r.giveaways if g.tier == "seguro"][:3]:
         lines.append(
             f"  🎁 {(g.item.description or '')[:38]} — {g.item.unit_retail:,.0f} EUR "
-            f"(vale ~{g.estimated_value:,.0f})"
+            f"(vale ~{g.reference_price:,.0f})"
         )
     if a.end_time:
         lines.append(f"Cierra: {a.end_time:%d/%m %H:%M}")

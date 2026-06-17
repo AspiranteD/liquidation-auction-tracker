@@ -61,11 +61,12 @@ def main():
                     }
                     for g in r.giveaways if g.tier == "seguro"
                 ],
-                "regalados_dudosos": len(
-                    [g for g in r.giveaways if g.tier == "dudoso"]
+                "regalados_sin_verificar": len(
+                    [g for g in r.giveaways if g.tier == "sin_verificar"]
                 ),
                 "valor_oculto_seguro": r.giveaway_value_sure,
-                "valor_oculto_dudoso": r.giveaway_value_doubt,
+                "valor_oculto_sin_verificar": r.giveaway_value_unverified,
+                "cajas_regaladas_eur": r.gifted_box_value_point,
                 "cajas": len(r.boxes),
                 "cajas_sospechosas": [
                     {"id": b.container_id, "objetos": b.units,
@@ -83,7 +84,7 @@ def main():
     trucks.sort(
         key=lambda t: (
             t["valor_oculto_seguro"]
-            + t["valor_oculto_dudoso"]
+            + t["valor_oculto_sin_verificar"]
             + 200 * len(t["pallets_cajas_faltan"])
             + 100 * len(t["cajas_sospechosas"])
         ),

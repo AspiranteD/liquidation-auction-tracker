@@ -3,16 +3,20 @@
 Goes beyond analyzer.py's aggregate stats to answer buyer questions:
 
 - Units/value per department, category and subcategory.
-- TVs: in liquidation truckloads the panels are effectively always broken, so
-  their declared retail is treated as a loss and subtracted from the
-  "effective retail" of the lot.
+- TVs: a panel in a liquidation truckload is effectively always broken, so its
+  declared retail is a loss. A line is a TV ONLY when the manifest's own
+  taxonomy says so (category "Televisions" or subcategory "TVs <size>"). We do
+  NOT guess from the description: projectors, monitors and TV accessories live
+  in other categories and are NOT losses.
 - Giveaways ("regalados"): premium products (iPhones, MacBooks, lenses...)
-  declared at absurd retail prices (10-16 EUR) because they were misclassified.
-  Detection is keyword-based with accessory exclusion, in two confidence
-  tiers, plus an optional live Amazon price check for the doubtful ones.
-- Box/pallet density: Amazon fills boxes and pallets to the top. A box with
-  2 declared items means undeclared content — flag containers whose unit
-  count or declared value is far below the lot's own median.
+  declared at absurd prices because they were misclassified. Detection finds
+  *suspects* (premium keyword + absurd price, minus accessories), then RESOLVES
+  the real price (Reusalia DB / cache / Amazon) to confirm or discard each one.
+  No more "dudosos": either it is verified as a giveaway, or it is dropped.
+- Box/pallet density: Amazon fills boxes and pallets to the top. A pallet of
+  boxes always carries 6 (validated on 217 historical pallets: max=6, mode=6);
+  fewer means whole boxes travel undeclared = gifted. We estimate the value of
+  the missing boxes with a clear range.
 """
 from __future__ import annotations
 
@@ -56,10 +60,14 @@ class InsightRules:
     """Thresholds for the deep analysis. Defaults calibrated on real
     manifests (Amazon EU truckloads: boxes carry ~12-60 units each)."""
 
-    # Giveaways: declared price under this fraction of the product's typical
-    # price -> "seguro" (certain) / "dudoso" (doubtful, verify before relying).
+    # Giveaways. A suspect is a premium product declared cheap. Once we have a
+    # reference price (verified or typical), the line is a giveaway iff its
+    # declared price is below ``giveaway_confirm_fraction`` of that reference.
+    giveaway_confirm_fraction: float = 0.40
+    # When the price could NOT be verified, only an EXTREME discount (below this
+    # fraction of the conservative typical price) is trusted as a sure giveaway;
+    # the middle band is reported separately as "sin verificar".
     giveaway_sure_fraction: float = 0.10
-    giveaway_doubt_fraction: float = 0.40
 
     # Boxes travel full to the top. Few declared units means hidden content
     # UNLESS the declared items are bulky enough to fill the box themselves
@@ -71,8 +79,9 @@ class InsightRules:
     box_bulky_weight_fraction: float = 0.6
     bulky_avg_item_kg: float = 5.0
 
-    # Amazon stacks this many boxes per "pallet de cajas"; fewer declared
-    # boxes may mean whole undeclared boxes.
+    # Amazon stacks this many boxes per "pallet de cajas". Validated on 217
+    # historical box-pallets: distribution {4:11, 5:55, 6:148}, max=mode=6.
+    # Fewer declared boxes => whole boxes travel undeclared (gifted).
     expected_boxes_per_pallet: int = 6
 
     # A single-package pallet whose items average at least this weight (kg)
@@ -84,14 +93,10 @@ class InsightRules:
     single_box_min_units: int = 20
     single_box_max_avg_kg: float = 2.5
 
-    # A "sure" TV must be declared at least at this price; below it the line
-    # is downgraded to "posible" (converters/dongles mention 4K too).
-    tv_min_price: float = 100.0
-
 
 # Premium products and the typical *minimum* market price of the cheapest
-# real variant (EUR). Deliberately conservative: used only to detect absurd
-# declared prices, not to estimate resale value.
+# real variant (EUR). Used as a conservative fallback ONLY when the real price
+# cannot be resolved; the resolver's verified price always wins.
 PREMIUM_PRODUCTS: Dict[str, float] = {
     r"iphone\s?(?:1[1-9]|se|pro|plus|max)": 250.0,
     r"\bmacbook\b": 600.0,
@@ -195,29 +200,13 @@ SURVEILLANCE_WORDS = [
     "trail camera", "camara de caza", "cámara de caza",
 ]
 
-# TV detection
-_TV_KEYWORD_RE = re.compile(
-    r"\b(?:tv|televisor(?:es)?|televisi[oó]n|television|fernseher|"
-    r"t[ée]l[ée]viseur|televisore|smart\s?tv)\b",
-    re.IGNORECASE,
-)
-_SCREEN_SIZE_RE = re.compile(
-    r"\b(\d{2,3})\s*(?:\"|”|″|''|inch(?:es)?|pulgadas|zoll|pouces|pollici)",
-    re.IGNORECASE,
-)
-_TV_PANEL_TECH_RE = re.compile(
-    r"\b(?:oled|qled|nanocell|uled|4k|uhd|ultra\s?hd|led\s?tv)\b", re.IGNORECASE
-)
-_TV_CATEGORY_RE = re.compile(r"\btv|television", re.IGNORECASE)
-# A category can say "TV" and still be accessories or audio ("TV Mounts &
-# Stands", "TV Audio/Soundbars"): don't let it promote the line to a sure TV.
-_TV_CATEGORY_ACCESSORY_RE = re.compile(
-    r"accessor|mount|stand|soporte|bracket|cable|remote|mando|audio|"
-    r"soundbar|speaker|altavoz",
-    re.IGNORECASE,
-)
-# Soundbars name "TV" and have panel-ish specs but are not panels.
-_SOUNDBAR_RE = re.compile(r"barra\s+de\s+sonido|sound\s?bar", re.IGNORECASE)
+# TV detection: TRUST THE MANIFEST TAXONOMY, not the free-text description.
+# - category "Televisions" (the B-Stock category for panels), or
+# - subcategory containing the token "TVs" ("TVs 61\"-69\"", "Refurbished TVs").
+# "TV Mounts", "TV Audio", "TV Stands" do NOT contain "TVs"; projectors and
+# monitors live in their own categories. So accessories/projectors never match.
+_TV_CATEGORY_RE = re.compile(r"^\s*televisi(?:on|ón)s?\s*$", re.IGNORECASE)
+_TV_SUBCATEGORY_RE = re.compile(r"\bTVs\b", re.IGNORECASE)
 
 AMAZON_URL = "https://www.amazon.es/dp/{asin}"
 
@@ -297,24 +286,25 @@ class GroupStats:
 @dataclass
 class TVFinding:
     item: ManifestItem
-    confidence: str  # "seguro" | "posible"
+    confidence: str  # "seguro" (taxonomy says TV = loss)
     reason: str
 
 
 @dataclass
 class GiveawayFinding:
     item: ManifestItem
-    tier: str          # "seguro" | "dudoso"
-    matched: str       # which premium product matched
-    typical_price: float
+    tier: str             # "seguro" (confirmed/extreme) | "sin_verificar"
+    matched: str          # which premium product / signal matched
+    reference_price: float  # best real-price estimate per unit
     reason: str
+    verified: bool = False        # True when reference_price came from DB/scrape/manifest
+    reference_source: str = "típico"  # cache | db_scraped | db_sale | amazon | lote | típico
     amazon_url: Optional[str] = None
-    verified_price: Optional[float] = None  # filled by the optional live check
 
     @property
     def estimated_value(self) -> float:
-        """Best estimate of the item's real value (verified beats typical)."""
-        return (self.verified_price or self.typical_price) * self.item.qty
+        """Best estimate of the line's real value."""
+        return self.reference_price * self.item.qty
 
     @property
     def hidden_value(self) -> float:
@@ -355,6 +345,12 @@ class PalletStats:
     suspicious: bool = False
     reason: str = ""
     missing_boxes: int = 0  # box-pallets declare 6; fewer = likely gifted
+    # Estimated retail of the missing (gifted) boxes: point estimate (average
+    # declared box of this pallet) with a [low, high] range from the cheapest
+    # and dearest declared box.
+    missing_value_point: float = 0.0
+    missing_value_low: float = 0.0
+    missing_value_high: float = 0.0
 
 
 @dataclass
@@ -370,17 +366,33 @@ class ManifestInsights:
     by_condition: List[GroupStats]
     tvs: List[TVFinding]
     tv_units: int
-    tv_loss_retail: float          # declared retail of certain TVs (loss)
+    tv_loss_retail: float          # declared retail of taxonomy TVs (loss)
     effective_retail: float        # total_retail - tv_loss_retail
     giveaways: List[GiveawayFinding]
-    giveaway_value_sure: float        # hidden value in "seguro" findings
-    giveaway_value_doubt: float       # hidden value in "dudoso" findings
+    giveaway_value_sure: float        # hidden value in confirmed findings
+    giveaway_value_unverified: float  # hidden value in "sin verificar" findings
     boxes: List[ContainerStats]       # real boxes (from multi-box pallets)
     pallets: List[PalletStats]        # every pallet, classified
     suspicious_boxes: List[ContainerStats]
     suspicious_pallets: List[PalletStats]  # box-pallets missing boxes
+    # Estimated retail hidden in gifted (undeclared) boxes, summed across the
+    # lot, as a point estimate with a [low, high] range.
+    gifted_box_value_point: float
+    gifted_box_value_low: float
+    gifted_box_value_high: float
     top_items: List[ManifestItem]
     warnings: List[str] = field(default_factory=list)
+
+    @property
+    def hidden_value_point(self) -> float:
+        """Total value the lot hides beyond its declared retail: confirmed
+        giveaway uplift + estimated gifted boxes (point estimate)."""
+        return self.giveaway_value_sure + self.gifted_box_value_point
+
+    @property
+    def real_retail_point(self) -> float:
+        """Declared retail + estimated hidden value (point estimate)."""
+        return self.total_retail + self.hidden_value_point
 
 
 # ---------------------------------------------------------------------------
@@ -409,78 +421,39 @@ def breakdown(items: List[ManifestItem], attr: str) -> List[GroupStats]:
 
 
 # ---------------------------------------------------------------------------
-# TVs (always broken -> loss)
+# TVs (always broken -> loss). Detected by manifest taxonomy ONLY.
 # ---------------------------------------------------------------------------
 
 def find_tvs(
     items: List[ManifestItem], rules: Optional[InsightRules] = None
 ) -> List[TVFinding]:
-    rules = rules or InsightRules()
+    """Flag panels using the manifest's own taxonomy. A line is a TV iff its
+    category is "Televisions" or its subcategory contains "TVs" (e.g.
+    'TVs 61"-69"'). Projectors, monitors and TV accessories are NOT TVs and
+    are never treated as a loss."""
     findings: List[TVFinding] = []
     for item in items:
-        desc = item.description or ""
-        cat_text = " ".join(filter(None, [item.category, item.subcategory]))
-
-        if _SOUNDBAR_RE.search(desc):
-            continue  # audio device, not a panel: no loss to assume
-
-        # Accessory titles lead with the accessory ("Soporte de pared para
-        # TV", "Fire TV Stick"); real TVs mention extras AFTER the TV name
-        # ("Samsung Smart TV 75Q60T ... One Remote Control, Chromecast").
-        kw_match = _TV_KEYWORD_RE.search(desc)
-        kw_pos = kw_match.start() if kw_match else None
-        acc_pos = _first_word_pos(desc, ACCESSORY_WORDS)
-        if acc_pos is not None and (kw_pos is None or acc_pos <= kw_pos):
-            continue
-
-        category_says_tv = bool(
-            _TV_CATEGORY_RE.search(cat_text)
-            and not _TV_CATEGORY_ACCESSORY_RE.search(cat_text)
-        )
-        keyword = kw_match is not None
-        size = bool(_SCREEN_SIZE_RE.search(desc))
-        panel_tech = bool(_TV_PANEL_TECH_RE.search(desc))
-
-        if category_says_tv or (keyword and (size or panel_tech)):
-            if item.unit_retail < rules.tv_min_price:
-                findings.append(
-                    TVFinding(
-                        item=item,
-                        confidence="posible",
-                        reason=(
-                            f"parece TV pero declarado a {item.unit_retail:.2f} EUR "
-                            f"(< {rules.tv_min_price:.0f}): probable accesorio"
-                        ),
-                    )
-                )
-            else:
-                findings.append(
-                    TVFinding(
-                        item=item,
-                        confidence="seguro",
-                        reason="categoría TV" if category_says_tv else "descripción con pulgadas/panel",
-                    )
-                )
-        elif keyword:
-            findings.append(
-                TVFinding(item=item, confidence="posible", reason="menciona TV sin pulgadas")
-            )
+        category = (item.category or "")
+        subcategory = (item.subcategory or "")
+        if _TV_CATEGORY_RE.match(category):
+            findings.append(TVFinding(item=item, confidence="seguro",
+                                      reason="categoría Televisions"))
+        elif _TV_SUBCATEGORY_RE.search(subcategory):
+            findings.append(TVFinding(item=item, confidence="seguro",
+                                      reason=f"subcategoría {subcategory.strip()}"))
     return findings
 
 
 # ---------------------------------------------------------------------------
-# Giveaways ("regalados")
+# Giveaways ("regalados"): detect suspects, then VERIFY the real price.
 # ---------------------------------------------------------------------------
 
-def find_giveaways(
-    items: List[ManifestItem], rules: Optional[InsightRules] = None
-) -> List[GiveawayFinding]:
-    rules = rules or InsightRules()
-    findings: List[GiveawayFinding] = []
-
-    # Signal 1: premium product at an absurd declared price. A premium
-    # product declared at 0.00 EUR is the most extreme giveaway possible,
-    # so a missing price never disqualifies the line.
+def _giveaway_suspects(
+    items: List[ManifestItem],
+) -> List[Tuple[ManifestItem, str, float]]:
+    """Premium-product lines declared cheap, after accessory/compat/surveillance
+    exclusion. Returns (item, matched_pattern, typical_price)."""
+    suspects: List[Tuple[ManifestItem, str, float]] = []
     for item in items:
         desc = item.description or ""
         if not desc or item.unit_retail < 0:
@@ -490,52 +463,93 @@ def find_giveaways(
             continue  # CCTV/webcams: cheap by nature, lens specs mislead
         for pattern, typical in PREMIUM_PRODUCTS.items():
             match = re.search(pattern, desc, re.IGNORECASE)
-            if match:
-                # Titles lead with the head noun: an accessory/peripheral
-                # word BEFORE the premium match means the line is the
-                # accessory ("Funda para iPhone", "Auriculares ... PS5"),
-                # after it is just specs ("iPhone 16 128GB de memoria").
-                if _word_before(desc, ACCESSORY_WORDS, match.start()):
-                    continue
-                # Bare brands lead with the brand name, so position can't
-                # tell device from accessory: any accessory word vetoes.
-                if pattern in _BRAND_ONLY and _has_accessory_word(desc):
-                    continue
-                if pattern in DEVICE_PATTERNS and _word_before(
-                    desc, PERIPHERAL_WORDS, match.start()
-                ):
-                    continue
-                if _is_compatibility_mention(desc, match.start()):
-                    continue  # "para iPhone 16", "compatible con MacBook"...
-                ratio = item.unit_retail / typical
-                if ratio < rules.giveaway_sure_fraction:
-                    tier = "seguro"
-                elif ratio < rules.giveaway_doubt_fraction:
-                    tier = "dudoso"
-                else:
-                    break  # premium product at a plausible price
-                findings.append(
-                    GiveawayFinding(
-                        item=item,
-                        tier=tier,
-                        matched=pattern,
-                        typical_price=typical,
-                        reason=(
-                            f"declarado a {item.unit_retail:.2f} EUR, "
-                            f"tipico >= {typical:.0f} EUR ({ratio:.0%})"
-                        ),
-                        amazon_url=AMAZON_URL.format(asin=item.asin) if item.asin else None,
-                    )
-                )
+            if not match:
+                continue
+            # Accessory/peripheral word BEFORE the premium match => the line is
+            # the accessory ("Funda para iPhone", "Auriculares ... PS5").
+            if _word_before(desc, ACCESSORY_WORDS, match.start()):
                 break
+            if pattern in _BRAND_ONLY and _has_accessory_word(desc):
+                break
+            if pattern in DEVICE_PATTERNS and _word_before(
+                desc, PERIPHERAL_WORDS, match.start()
+            ):
+                break
+            if _is_compatibility_mention(desc, match.start()):
+                break  # "para iPhone 16", "compatible con MacBook"...
+            suspects.append((item, pattern, typical))
+            break
+    return suspects
 
-    # Signal 2: same ASIN priced wildly differently inside the same manifest
-    # (the cheap lines are almost certainly misclassified).
+
+def find_giveaways(
+    items: List[ManifestItem],
+    rules: Optional[InsightRules] = None,
+    resolver=None,
+) -> List[GiveawayFinding]:
+    """Detect misclassified premium products.
+
+    Two signals:
+
+    1. Premium keyword at an absurd declared price. Each suspect's REAL price is
+       resolved via ``resolver`` (PriceResolver: DB -> cache -> Amazon). If the
+       declared price is below ``giveaway_confirm_fraction`` of the verified
+       price it is a confirmed ("seguro") giveaway; if it matches the real price
+       it is discarded (false positive). When the price cannot be verified, only
+       an extreme discount (< ``giveaway_sure_fraction`` of the conservative
+       typical price) is trusted; the middle band is reported "sin_verificar".
+    2. Same ASIN priced wildly differently within the manifest: the cheap line
+       is self-evidently misclassified (reference = the dear line). Always
+       "seguro" — the manifest itself is the proof.
+    """
+    rules = rules or InsightRules()
+    findings: List[GiveawayFinding] = []
+    already = set()
+
+    for item, pattern, typical in _giveaway_suspects(items):
+        url = AMAZON_URL.format(asin=item.asin) if item.asin else None
+        resolved = resolver.resolve(item.asin) if (resolver and item.asin) else None
+
+        if resolved is not None and resolved.found:
+            ref = resolved.price
+            if item.unit_retail < ref * rules.giveaway_confirm_fraction:
+                findings.append(GiveawayFinding(
+                    item=item, tier="seguro", matched=pattern,
+                    reference_price=ref, verified=True,
+                    reference_source=resolved.source,
+                    reason=(f"declarado {item.unit_retail:.2f} EUR, precio real "
+                            f"verificado {ref:.0f} EUR ({resolved.source})"),
+                    amazon_url=url,
+                ))
+                already.add(id(item))
+            # else: real price ~ declared price -> false positive, discard.
+            continue
+
+        # Could not verify: fall back to the conservative typical price.
+        ratio = item.unit_retail / typical if typical else 0.0
+        if ratio < rules.giveaway_sure_fraction:
+            tier, src = "seguro", "típico (descuento extremo)"
+        elif ratio < rules.giveaway_confirm_fraction:
+            tier, src = "sin_verificar", "típico (sin verificar)"
+        else:
+            continue  # premium product at a plausible price
+        findings.append(GiveawayFinding(
+            item=item, tier=tier, matched=pattern,
+            reference_price=typical, verified=False, reference_source=src,
+            reason=(f"declarado {item.unit_retail:.2f} EUR, típico >= "
+                    f"{typical:.0f} EUR ({ratio:.0%}); no se pudo verificar"
+                    if tier == "sin_verificar" else
+                    f"declarado {item.unit_retail:.2f} EUR, típico >= "
+                    f"{typical:.0f} EUR ({ratio:.0%}): descuento extremo"),
+            amazon_url=url,
+        ))
+        already.add(id(item))
+
+    # Signal 2: same ASIN priced wildly differently inside the same manifest.
     by_asin: Dict[str, List[ManifestItem]] = defaultdict(list)
     for item in items:
         if item.asin and item.unit_retail > 0:
             by_asin[item.asin].append(item)
-    already = {id(f.item) for f in findings}
     for asin, group in by_asin.items():
         prices = [i.unit_retail for i in group]
         top = max(prices)
@@ -543,56 +557,17 @@ def find_giveaways(
             continue
         for item in group:
             if item.unit_retail <= top / 5 and id(item) not in already:
-                findings.append(
-                    GiveawayFinding(
-                        item=item,
-                        tier="dudoso",
-                        matched="mismo ASIN con precio dispar",
-                        typical_price=top,
-                        reason=(
-                            f"mismo ASIN aparece a {top:.2f} EUR y esta linea "
-                            f"a {item.unit_retail:.2f} EUR"
-                        ),
-                        amazon_url=AMAZON_URL.format(asin=asin),
-                    )
-                )
+                findings.append(GiveawayFinding(
+                    item=item, tier="seguro", matched="mismo ASIN con precio dispar",
+                    reference_price=top, verified=True, reference_source="lote",
+                    reason=(f"mismo ASIN aparece a {top:.2f} EUR y esta línea "
+                            f"a {item.unit_retail:.2f} EUR"),
+                    amazon_url=AMAZON_URL.format(asin=asin),
+                ))
+                already.add(id(item))
 
-    findings.sort(key=lambda f: (f.tier != "seguro", f.item.unit_retail))
+    findings.sort(key=lambda f: (f.tier != "seguro", -f.hidden_value))
     return findings
-
-
-def verify_giveaway_prices(
-    findings: List[GiveawayFinding], timeout: int = 15, max_checks: int = 10
-) -> None:
-    """Best-effort live price check on amazon.es for doubtful giveaways.
-
-    EXPERIMENTAL: Amazon blocks bots aggressively, so this often returns
-    nothing — findings keep their amazon_url for manual verification. Mutates
-    ``findings`` in place, filling ``verified_price`` when a price is found.
-    """
-    import requests
-
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        ),
-        "Accept-Language": "es-ES,es;q=0.9",
-    }
-    price_re = re.compile(r'"priceAmount"\s*:\s*([0-9]+(?:\.[0-9]+)?)')
-    checked = 0
-    for finding in findings:
-        if finding.tier != "dudoso" or not finding.item.asin or checked >= max_checks:
-            continue
-        checked += 1
-        url = AMAZON_URL.format(asin=finding.item.asin)
-        try:
-            response = requests.get(url, headers=headers, timeout=timeout)
-            match = price_re.search(response.text)
-            if match:
-                finding.verified_price = float(match.group(1))
-        except Exception as exc:  # noqa: BLE001 - never fail the report
-            logger.debug("Amazon check failed for %s: %s", finding.item.asin, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -688,14 +663,31 @@ def analyze_containers(
 
         if pallet_type == "cajas":
             missing = rules.expected_boxes_per_pallet - len(box_ids)
+            # Per-box declared retail of THIS pallet -> estimate the gifted box.
+            declared_box_retails = [
+                sum(i.line_retail for i in p_items if i.box_id == b)
+                for b in box_ids
+            ]
+            if not declared_box_retails:
+                # single-box-pallet inferred from light items: use whole pallet
+                declared_box_retails = [pallet.retail]
             if missing > 0:
+                avg_box = statistics.mean(declared_box_retails)
+                lo_box = min(declared_box_retails)
+                hi_box = max(declared_box_retails)
                 pallet.suspicious = True
                 pallet.missing_boxes = missing
+                pallet.missing_value_point = round(missing * avg_box, 2)
+                pallet.missing_value_low = round(missing * lo_box, 2)
+                pallet.missing_value_high = round(missing * hi_box, 2)
                 pallet.reason = (
                     f"solo {len(box_ids)} de {rules.expected_boxes_per_pallet} "
                     f"cajas declaradas — un pallet de cajas lleva SIEMPRE "
-                    f"{rules.expected_boxes_per_pallet}: lo más probable es que "
-                    f"{missing} caja(s) enteras vayan REGALADAS (sin declarar)"
+                    f"{rules.expected_boxes_per_pallet}: {missing} caja(s) van "
+                    f"probablemente REGALADAS, valor estimado "
+                    f"{pallet.missing_value_point:,.0f} EUR "
+                    f"(rango {pallet.missing_value_low:,.0f}–"
+                    f"{pallet.missing_value_high:,.0f})"
                 )
             for box_id in box_ids:
                 b_items = [i for i in p_items if i.box_id == box_id]
@@ -733,9 +725,6 @@ def analyze_containers(
             base = baselines.get(dept) if baselines else None
             lot_sparse = box.units <= lot_floor and box.units < median_units
             if base:
-                # Anomalous for its CATEGORY and (when the lot offers enough
-                # boxes to compare) for its OWN lot: atypical lots — e.g. a
-                # big-toys truck whose boxes all run small — must not flood.
                 base_sparse = box.units < base["p10"]
                 sparse = base_sparse and (lot_sparse or len(boxes) < 8)
                 typical = f"{base['p25']:.0f}-{base['p75']:.0f}"
@@ -783,10 +772,14 @@ def deep_analyze(
     items: List[ManifestItem],
     label: str = "manifest",
     rules: Optional[InsightRules] = None,
-    verify_prices: bool = False,
+    resolver=None,
     baselines: Optional[Dict] = None,
 ) -> ManifestInsights:
-    """Run the full deep analysis over parsed manifest items."""
+    """Run the full deep analysis over parsed manifest items.
+
+    ``resolver`` (a pricing.PriceResolver) enables real-price verification of
+    giveaway suspects. Without it, only conservative typical-price heuristics
+    are used (and uncertain suspects are reported "sin verificar")."""
     rules = rules or InsightRules()
     warnings: List[str] = []
 
@@ -794,15 +787,13 @@ def deep_analyze(
     total_retail = round(sum(i.line_retail for i in items), 2)
 
     tvs = find_tvs(items, rules)
-    sure_tvs = [t for t in tvs if t.confidence == "seguro"]
-    tv_units = sum(t.item.qty for t in sure_tvs)
-    tv_loss = round(sum(t.item.line_retail for t in sure_tvs), 2)
+    tv_units = sum(t.item.qty for t in tvs)
+    tv_loss = round(sum(t.item.line_retail for t in tvs), 2)
 
-    giveaways = find_giveaways(items, rules)
-    if verify_prices and any(g.tier == "dudoso" for g in giveaways):
-        verify_giveaway_prices(giveaways)
+    giveaways = find_giveaways(items, rules, resolver=resolver)
 
     boxes, pallets = analyze_containers(items, rules, baselines)
+    suspicious_pallets = [p for p in pallets if p.suspicious]
 
     if not any(i.box_id for i in items):
         warnings.append("El manifiesto no trae columna de caja (PkgID): sin análisis por caja.")
@@ -834,24 +825,29 @@ def deep_analyze(
         giveaway_value_sure=round(
             sum(g.hidden_value for g in giveaways if g.tier == "seguro"), 2
         ),
-        giveaway_value_doubt=round(
-            sum(g.hidden_value for g in giveaways if g.tier == "dudoso"), 2
+        giveaway_value_unverified=round(
+            sum(g.hidden_value for g in giveaways if g.tier == "sin_verificar"), 2
         ),
         boxes=boxes,
         pallets=pallets,
         suspicious_boxes=[b for b in boxes if b.suspicious],
-        suspicious_pallets=[p for p in pallets if p.suspicious],
+        suspicious_pallets=suspicious_pallets,
+        gifted_box_value_point=round(
+            sum(p.missing_value_point for p in suspicious_pallets), 2
+        ),
+        gifted_box_value_low=round(
+            sum(p.missing_value_low for p in suspicious_pallets), 2
+        ),
+        gifted_box_value_high=round(
+            sum(p.missing_value_high for p in suspicious_pallets), 2
+        ),
         top_items=top_items,
         warnings=warnings,
     )
 
 
 def quick_read(insights: "ManifestInsights") -> List[str]:
-    """Plain-language conclusions with concrete figures, for humans.
-
-    E.g. "4 objetos que podrían venderse por ~750 EUR están declarados por
-    186 EUR" / "3 cajas van demasiado vacías: puede haber regalados dentro".
-    """
+    """Plain-language conclusions with concrete figures, for humans."""
     bullets: List[str] = []
 
     # Whole gifted boxes first: it is the single most valuable signal.
@@ -863,19 +859,28 @@ def quick_read(insights: "ManifestInsights") -> List[str]:
         )
         bullets.append(
             f"🎁📦 ¡{total_missing} CAJAS ENTERAS probablemente REGALADAS! "
+            f"valor estimado {insights.gifted_box_value_point:,.0f} EUR "
+            f"(rango {insights.gifted_box_value_low:,.0f}–"
+            f"{insights.gifted_box_value_high:,.0f}). "
             f"Los pallets de cajas llevan siempre 6 y aquí faltan ({detail})."
         )
 
-    if insights.giveaways:
-        declared = sum(g.item.line_retail for g in insights.giveaways)
-        estimated = sum(g.estimated_value for g in insights.giveaways)
-        sure_n = sum(1 for g in insights.giveaways if g.tier == "seguro")
-        doubt_n = len(insights.giveaways) - sure_n
+    confirmed = [g for g in insights.giveaways if g.tier == "seguro"]
+    unverified = [g for g in insights.giveaways if g.tier == "sin_verificar"]
+    if confirmed:
+        estimated = sum(g.estimated_value for g in confirmed)
+        declared = sum(g.item.line_retail for g in confirmed)
         bullets.append(
-            f"🎁 {len(insights.giveaways)} objetos que podrían venderse por "
-            f"~{estimated:,.0f} EUR están declarados por {declared:,.0f} EUR "
-            f"({sure_n} seguros, {doubt_n} por verificar — pruebas con enlace "
+            f"🎁 {len(confirmed)} artículos mal clasificados CONFIRMADOS: valen "
+            f"~{estimated:,.0f} EUR y están declarados por {declared:,.0f} EUR "
+            f"(uplift {insights.giveaway_value_sure:,.0f} EUR; pruebas con enlace "
             f"en la tabla de regalados)."
+        )
+    if unverified:
+        bullets.append(
+            f"🔎 {len(unverified)} sospechosos no se pudieron verificar online "
+            f"(~{insights.giveaway_value_unverified:,.0f} EUR potenciales): "
+            f"revisar a mano con el enlace."
         )
 
     if insights.suspicious_boxes:
@@ -891,7 +896,7 @@ def quick_read(insights: "ManifestInsights") -> List[str]:
 
     if insights.tv_units:
         bullets.append(
-            f"📺 {insights.tv_units} TVs = pérdida de "
+            f"📺 {insights.tv_units} TVs (categoría Televisions) = pérdida de "
             f"{insights.tv_loss_retail:,.0f} EUR (los paneles llegan rotos)."
         )
 
@@ -910,9 +915,9 @@ def quick_read(insights: "ManifestInsights") -> List[str]:
         )
 
     bullets.append(
-        f"✅ Retail efectivo para calcular la puja: "
-        f"{insights.effective_retail:,.0f} EUR "
-        f"(de {insights.total_retail:,.0f} EUR declarados)."
+        f"✅ Retail declarado {insights.total_retail:,.0f} EUR · efectivo (sin "
+        f"TVs) {insights.effective_retail:,.0f} EUR · REAL estimado con oculto "
+        f"~{insights.real_retail_point:,.0f} EUR."
     )
     return bullets
 
@@ -948,19 +953,27 @@ def render_report(insights: ManifestInsights) -> str:
     out += [f"- {bullet}" for bullet in quick_read(insights)]
     out += [""]
 
+    confirmed = [g for g in insights.giveaways if g.tier == "seguro"]
+    unverified = [g for g in insights.giveaways if g.tier == "sin_verificar"]
     out += [
         "## Resumen",
         "",
         f"- Líneas: **{insights.total_lines}** · Unidades: **{insights.total_units}**",
         f"- Retail declarado: **{insights.total_retail:,.2f} EUR** "
         f"(media {insights.avg_unit_retail:,.2f} EUR/ud)",
-        f"- TVs (pérdida asumida): **{insights.tv_units} uds, "
+        f"- TVs (pérdida, categoría Televisions): **{insights.tv_units} uds, "
         f"{insights.tv_loss_retail:,.2f} EUR**",
         f"- **Retail efectivo (sin TVs): {insights.effective_retail:,.2f} EUR**",
-        f"- Regalados detectados: **{len([g for g in insights.giveaways if g.tier == 'seguro'])} seguros, "
-        f"{len([g for g in insights.giveaways if g.tier == 'dudoso'])} dudosos**",
-        f"- **Valor estimado regalado: {insights.giveaway_value_sure:,.2f} EUR seguros "
-        f"+ {insights.giveaway_value_doubt:,.2f} EUR dudosos** (pruebas en la sección de regalados)",
+        f"- Regalados confirmados: **{len(confirmed)}** "
+        f"(uplift {insights.giveaway_value_sure:,.2f} EUR) · "
+        f"sin verificar: {len(unverified)} "
+        f"({insights.giveaway_value_unverified:,.2f} EUR)",
+        f"- **Cajas regaladas estimadas: {insights.gifted_box_value_point:,.0f} EUR** "
+        f"(rango {insights.gifted_box_value_low:,.0f}–"
+        f"{insights.gifted_box_value_high:,.0f})",
+        f"- **Valor REAL estimado del lote: {insights.real_retail_point:,.0f} EUR** "
+        f"(declarado {insights.total_retail:,.0f} + oculto "
+        f"{insights.hidden_value_point:,.0f})",
         f"- Cajas reales: {len(insights.boxes)} ({len(insights.suspicious_boxes)} demasiado vacías) · "
         f"Pallets: {len(insights.pallets)} ({len(insights.suspicious_pallets)} con cajas de menos)",
         "",
@@ -972,35 +985,51 @@ def render_report(insights: ManifestInsights) -> str:
     out += _group_table(insights.by_category)
     out += ["", "## Por subcategoría", ""]
     out += _group_table(insights.by_subcategory)
-    out += ["", "## Por condición", ""]
+    out += ["", "## Por condición (solo dato, NO afecta a la valoración)", ""]
     out += _group_table(insights.by_condition)
 
     out += ["", "## Televisores (pérdida: los paneles llegan rotos)", ""]
-    sure = [t for t in insights.tvs if t.confidence == "seguro"]
-    maybe = [t for t in insights.tvs if t.confidence == "posible"]
-    if sure:
+    if insights.tvs:
         out += _table(
             ["Descripción", "Uds", "Retail EUR", "Detección"],
             [
                 [(t.item.description or "")[:60], str(t.item.qty),
                  f"{t.item.line_retail:,.2f}", t.reason]
-                for t in sure
+                for t in insights.tvs
             ],
         )
         out.append(f"\n**Pérdida total estimada: {insights.tv_loss_retail:,.2f} EUR**")
     else:
-        out.append("Sin televisores detectados.")
-    if maybe:
-        out += ["", "Posibles TVs (revisar a mano, no descontados):", ""]
-        out += [f"- {(t.item.description or '')[:80]} ({t.item.unit_retail:,.2f} EUR)" for t in maybe]
+        out.append("Sin televisores (categoría Televisions) en este lote.")
+
+    out += ["", "## Cajas regaladas (lo más importante)", ""]
+    if insights.suspicious_pallets:
+        out += [
+            f"**Valor estimado de las cajas que faltan: "
+            f"{insights.gifted_box_value_point:,.0f} EUR** "
+            f"(rango {insights.gifted_box_value_low:,.0f}–"
+            f"{insights.gifted_box_value_high:,.0f}). Un pallet de cajas lleva "
+            f"siempre 6; las que faltan viajan sin declarar.",
+            "",
+        ]
+        out += _table(
+            ["Pallet", "Cajas decl.", "Faltan", "Valor estimado EUR", "Rango EUR"],
+            [
+                [p.pallet_id[:20], f"{p.box_count}/6", str(p.missing_boxes),
+                 f"{p.missing_value_point:,.0f}",
+                 f"{p.missing_value_low:,.0f}–{p.missing_value_high:,.0f}"]
+                for p in insights.suspicious_pallets
+            ],
+        )
+    else:
+        out.append("Ningún pallet de cajas incompleto.")
 
     out += ["", "## Artículos regalados (mal clasificados)", ""]
     if insights.giveaways:
-        total_hidden = insights.giveaway_value_sure + insights.giveaway_value_doubt
         out += [
-            f"**Valor estimado regalado: {total_hidden:,.2f} EUR** "
-            f"({insights.giveaway_value_sure:,.2f} EUR en seguros, "
-            f"{insights.giveaway_value_doubt:,.2f} EUR en dudosos). "
+            f"**Valor estimado regalado confirmado: "
+            f"{insights.giveaway_value_sure:,.2f} EUR** "
+            f"(+{insights.giveaway_value_unverified:,.2f} EUR sin verificar). "
             "Pruebas, una línea por artículo:",
             "",
         ]
@@ -1010,27 +1039,26 @@ def render_report(insights: ManifestInsights) -> str:
                 f"[{g.item.asin}]({g.amazon_url})" if g.item.asin and g.amazon_url
                 else (g.item.asin or "-")
             )
-            verified = f"{g.verified_price:,.0f}" if g.verified_price else "-"
+            tier = "CONFIRMADO" if g.tier == "seguro" else "SIN VERIF."
             rows.append([
-                (g.item.description or "")[:55],
+                (g.item.description or "")[:50],
                 asin_link,
                 f"{g.item.unit_retail:,.2f}",
-                f"{g.estimated_value:,.0f}",
+                f"{g.reference_price:,.0f}",
                 f"**{g.hidden_value:,.0f}**",
-                verified,
-                g.tier.upper(),
+                g.reference_source,
+                tier,
             ])
         out += _table(
-            ["Descripción", "ASIN", "Declarado EUR", "Est. real EUR",
-             "Oculto EUR", "Amazon EUR", "Nivel"],
+            ["Descripción", "ASIN", "Declarado EUR", "Real est. EUR",
+             "Oculto EUR", "Fuente", "Estado"],
             rows,
         )
         out.append("")
         out.append(
-            "> 'Est. real' = precio verificado en Amazon si la comprobación "
-            "automática funcionó; si no, el precio típico mínimo del producto "
-            "(conservador). 'Oculto' = est. real − declarado. Los *dudosos* "
-            "requieren verificación manual: clic en el ASIN."
+            "> 'Real est.' = precio verificado (BD/caché/Amazon) cuando se pudo "
+            "resolver; si no, el típico mínimo conservador. 'Oculto' = real − "
+            "declarado. Los SIN VERIF. requieren un vistazo manual (clic en ASIN)."
         )
     else:
         out.append("Sin regalados detectados con las reglas actuales.")

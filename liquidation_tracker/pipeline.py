@@ -12,6 +12,7 @@ from .client import BStockClient, CloudflareChallenge
 from .config import Settings
 from .models import Auction
 from .notifier import CallNotifier, EmailNotifier, WhatsAppNotifier
+from .recovery import load_recovery
 from .storage import Storage
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ class MonitorPipeline:
         self.client = BStockClient()
         self.storage = Storage(settings.db_path)
         self.calculator = BidCalculator()
+        self.recovery_model = load_recovery()
         self.notifiers = [
             EmailNotifier(settings.email),
             WhatsAppNotifier(settings.whatsapp),
@@ -66,7 +68,9 @@ class MonitorPipeline:
                             exc,
                         )
 
-                decision = alerts.evaluate(auction, rules, self.calculator)
+                decision = alerts.evaluate(
+                    auction, rules, self.calculator, self.recovery_model
+                )
                 self.storage.upsert_auction(auction, decision.breakdown)
 
                 stages = sorted(rules.reminder_stages, reverse=True)
