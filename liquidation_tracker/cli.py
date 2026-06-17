@@ -30,7 +30,7 @@ from .client import BStockClient, CloudflareChallenge
 from .config import Settings
 from .notifier import EmailNotifier, WhatsAppNotifier
 from .pipeline import MonitorPipeline
-from .pricing import PriceResolver
+from .pricing import PriceResolver, prime_cache
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -234,6 +234,38 @@ def cmd_manifests(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_prime_prices(args: argparse.Namespace) -> int:
+    """Write verified ASIN=price pairs into the shared price cache.
+
+    The bridge for "normal web search": prices looked up by hand (or by an
+    assistant) get cached so the autonomous monitor resolves them for free.
+    Accepts inline pairs (--set B0XXX=1046,B0YYY=250) and/or a JSON file
+    (--file prices.json with {"B0XXX": 1046, ...}).
+    """
+    prices: dict = {}
+    if args.file:
+        if not os.path.exists(args.file):
+            print(f"File not found: {args.file}", file=sys.stderr)
+            return 2
+        import json
+        with open(args.file, encoding="utf-8") as fh:
+            prices.update(json.load(fh))
+    for pair in args.set or []:
+        for chunk in pair.split(","):
+            if "=" in chunk:
+                asin, value = chunk.split("=", 1)
+                try:
+                    prices[asin.strip()] = float(value)
+                except ValueError:
+                    print(f"Ignoro par inválido: {chunk}", file=sys.stderr)
+    if not prices:
+        print("Nada que escribir (usa --set o --file).", file=sys.stderr)
+        return 2
+    written = prime_cache(prices, source=args.source)
+    print(f"{written} precios escritos en la caché ({args.source}).")
+    return 0
+
+
 def cmd_watch(args: argparse.Namespace) -> int:
     """Detect new auctions, build their PDF report and ping WhatsApp."""
     settings = Settings.from_env()
@@ -385,6 +417,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_digest.add_argument("--report-dir", default="data/reports")
     p_digest.set_defaults(func=cmd_digest)
+
+    p_prime = sub.add_parser(
+        "prime-prices",
+        help="Write verified ASIN=price pairs into the shared price cache",
+    )
+    p_prime.add_argument("--set", action="append",
+                         help="Inline pairs, e.g. B0XXX=1046,B0YYY=250")
+    p_prime.add_argument("--file", help='JSON file: {"B0XXX": 1046, ...}')
+    p_prime.add_argument("--source", default="manual",
+                         help="Label stored with each price (default: manual)")
+    p_prime.set_defaults(func=cmd_prime_prices)
 
     return parser
 

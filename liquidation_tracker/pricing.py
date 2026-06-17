@@ -32,6 +32,13 @@ DEFAULT_ENV = r"C:\Users\guill\CursorProjects\_ARCHIVADO_reusalia-backend_usar_c
 CACHE_PATH = "data/price_cache.json"
 AMAZON_URL = "https://www.amazon.es/dp/{asin}"
 
+# EUR Amazon marketplaces to try, in order. We deliberately stay in the euro
+# zone: amazon.co.uk (GBP) / amazon.pl (PLN) would need FX and give wrong
+# comparisons against the EUR manifest retail. ASINs are largely shared across
+# EU marketplaces, so .es (our resale market) + .de (largest catalogue) covers
+# most products without a currency mismatch.
+EUR_DOMAINS = ("es", "de")
+
 # Lifted defaults from the backend's UserAgentManager fallback list.
 DEFAULT_USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -63,6 +70,29 @@ class ResolvedPrice:
         return self.price is not None
 
 
+def prime_cache(prices: dict, path: str = CACHE_PATH, source: str = "manual") -> int:
+    """Merge externally verified {asin: price} pairs into the shared price cache.
+
+    This is the bridge for "normal web search": when prices are looked up by
+    hand (or by an assistant) instead of the autonomous scraper, writing them
+    here means the next monitor run resolves them for free from cache. Returns
+    how many entries were written. Existing entries are overwritten."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            cache = json.load(fh)
+    except (OSError, ValueError):
+        cache = {}
+    written = 0
+    for asin, price in prices.items():
+        if asin and price is not None:
+            cache[asin] = {"price": float(price), "source": source}
+            written += 1
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(cache, fh, indent=1, ensure_ascii=False)
+    return written
+
+
 # ---------------------------------------------------------------------------
 # Amazon scraper (standalone, lifted from the backend)
 # ---------------------------------------------------------------------------
@@ -90,23 +120,24 @@ class AmazonScraper:
             "Referer": "https://www.amazon.es/",
         }
 
-    def _warm(self) -> None:
+    def _warm(self, domain: str = "es") -> None:
         if self._warmed:
             return
         self._warmed = True
         try:
-            self._session.get("https://www.amazon.es/", headers=self._headers(), timeout=12)
+            self._session.get(f"https://www.amazon.{domain}/",
+                              headers=self._headers(), timeout=12)
         except Exception as exc:  # noqa: BLE001
             logger.debug("Warm-up falló (no crítico): %s", exc)
 
-    def scrape_price(self, asin: str, timeout: int = 15) -> dict:
+    def scrape_price(self, asin: str, domain: str = "es", timeout: int = 15) -> dict:
         from bs4 import BeautifulSoup
-        self._warm()
-        url = AMAZON_URL.format(asin=asin)
+        self._warm(domain)
+        url = f"https://www.amazon.{domain}/dp/{asin}"
         try:
             resp = self._session.get(url, headers=self._headers(), timeout=timeout)
         except Exception as exc:  # noqa: BLE001 - network failure, retry later
-            logger.debug("Scrape ASIN %s falló: %s", asin, exc)
+            logger.debug("Scrape ASIN %s (%s) falló: %s", asin, domain, exc)
             return {"_status": "error"}
 
         body = resp.text
@@ -305,19 +336,24 @@ class PriceResolver:
                 logger.info("Scraper no disponible (%s); sigo sin scraping.", exc)
                 self.enable_scrape = False
                 return None
-        data = self._scraper.scrape_price(asin)
-        status = data.get("_status")
-        if status == "blocked":
-            self._consecutive_blocks += 1
+        # Try each EUR marketplace until one yields a price. A real 404 on .es
+        # is worth retrying on .de (catalogue differs); a block aborts early.
+        for domain in EUR_DOMAINS:
             if self._consecutive_blocks >= self.max_blocks:
-                logger.warning(
-                    "Amazon bloquea (%d seguidos): desactivo scraping este pase.",
-                    self._consecutive_blocks,
-                )
-            return None
-        self._consecutive_blocks = 0
-        if self.scrape_delay:
-            time.sleep(self.scrape_delay)
-        if status == 200:
-            return data.get("price")
+                return None
+            data = self._scraper.scrape_price(asin, domain=domain)
+            status = data.get("_status")
+            if status == "blocked":
+                self._consecutive_blocks += 1
+                if self._consecutive_blocks >= self.max_blocks:
+                    logger.warning(
+                        "Amazon bloquea (%d seguidos): desactivo scraping este pase.",
+                        self._consecutive_blocks,
+                    )
+                continue
+            self._consecutive_blocks = 0
+            if self.scrape_delay:
+                time.sleep(self.scrape_delay)
+            if status == 200 and data.get("price") is not None:
+                return data.get("price")
         return None

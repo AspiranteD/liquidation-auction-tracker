@@ -1,7 +1,9 @@
 """Price resolution + verified-giveaway behavior, all offline (fake resolver)."""
+import json
+
 from liquidation_tracker import insights
 from liquidation_tracker.models import ManifestItem
-from liquidation_tracker.pricing import PriceResolver, ResolvedPrice
+from liquidation_tracker.pricing import PriceResolver, ResolvedPrice, prime_cache
 
 
 class FakeResolver:
@@ -77,3 +79,37 @@ def test_resolver_missing_returns_none(tmp_path):
     result = resolver.resolve("B0MISSING")
     assert result.found is False
     assert result.price is None
+
+
+def test_prime_cache_then_resolve_from_it(tmp_path):
+    # "Normal web search" bridge: hand-verified prices land in the shared cache
+    # and the next resolver reads them for free.
+    cache = str(tmp_path / "cache.json")
+    written = prime_cache({"B0AAA": 1046.0, "B0BBB": 250.0}, path=cache,
+                          source="web")
+    assert written == 2
+    data = json.loads(open(cache, encoding="utf-8").read())
+    assert data["B0AAA"]["price"] == 1046.0
+    assert data["B0AAA"]["source"] == "web"
+
+    resolver = PriceResolver(cache_path=cache, use_db=False, enable_scrape=False)
+    assert resolver.resolve("B0AAA").price == 1046.0
+
+
+def test_max_verify_caps_resolution_to_top_value(tmp_path):
+    # Only the single highest-value suspect is resolved; the cheaper one is not
+    # sent to the resolver (it falls back to the heuristic).
+    asked = []
+
+    class Counting:
+        def resolve(self, asin):
+            asked.append(asin)
+            return ResolvedPrice(asin, 1046.0, "fake", "alta")
+
+    items = [
+        _item(description="Apple MacBook Air M4", unit_retail=16.0, asin="B0BIG"),
+        _item(description="Apple AirPods", unit_retail=5.0, asin="B0SMALL"),
+    ]
+    insights.find_giveaways(items, resolver=Counting(), max_verify=1)
+    # MacBook (typical 600) outranks AirPods (typical 100) for the budget.
+    assert asked == ["B0BIG"]

@@ -486,6 +486,7 @@ def find_giveaways(
     items: List[ManifestItem],
     rules: Optional[InsightRules] = None,
     resolver=None,
+    max_verify: int = 12,
 ) -> List[GiveawayFinding]:
     """Detect misclassified premium products.
 
@@ -506,9 +507,23 @@ def find_giveaways(
     findings: List[GiveawayFinding] = []
     already = set()
 
-    for item, pattern, typical in _giveaway_suspects(items):
+    # Spend the (rate-limited, blockable) verification budget on the suspects
+    # with the most potential hidden value; the rest use the conservative
+    # heuristic. Keeps free scraping focused and reduces antibot blocks.
+    suspects = _giveaway_suspects(items)
+    verify_ids = {
+        id(item) for item, _, typical in sorted(
+            suspects, key=lambda s: s[2] - s[0].unit_retail, reverse=True
+        )[:max_verify]
+    } if resolver else set()
+
+    for item, pattern, typical in suspects:
         url = AMAZON_URL.format(asin=item.asin) if item.asin else None
-        resolved = resolver.resolve(item.asin) if (resolver and item.asin) else None
+        resolved = (
+            resolver.resolve(item.asin)
+            if (resolver and item.asin and id(item) in verify_ids)
+            else None
+        )
 
         if resolved is not None and resolved.found:
             ref = resolved.price
@@ -774,12 +789,14 @@ def deep_analyze(
     rules: Optional[InsightRules] = None,
     resolver=None,
     baselines: Optional[Dict] = None,
+    max_verify: int = 12,
 ) -> ManifestInsights:
     """Run the full deep analysis over parsed manifest items.
 
     ``resolver`` (a pricing.PriceResolver) enables real-price verification of
-    giveaway suspects. Without it, only conservative typical-price heuristics
-    are used (and uncertain suspects are reported "sin verificar")."""
+    giveaway suspects (the ``max_verify`` highest-value ones). Without it, only
+    conservative typical-price heuristics are used (uncertain suspects are then
+    reported "sin verificar")."""
     rules = rules or InsightRules()
     warnings: List[str] = []
 
@@ -790,7 +807,7 @@ def deep_analyze(
     tv_units = sum(t.item.qty for t in tvs)
     tv_loss = round(sum(t.item.line_retail for t in tvs), 2)
 
-    giveaways = find_giveaways(items, rules, resolver=resolver)
+    giveaways = find_giveaways(items, rules, resolver=resolver, max_verify=max_verify)
 
     boxes, pallets = analyze_containers(items, rules, baselines)
     suspicious_pallets = [p for p in pallets if p.suspicious]

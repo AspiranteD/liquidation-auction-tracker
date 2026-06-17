@@ -27,6 +27,23 @@
 >    DOS cifras: sobre retail declarado y sobre el retail REAL (con cajas
 >    regaladas + mal clasificados) — tu ventaja informativa.
 >
+> ### Verificación de precios SIN coste (sin Keepa) — 17/06
+>
+> Cadena de resolución, todo gratis y se complementa:
+> 1. **BD Reusalia** (27k ASINs) → 2. **caché permanente** (`data/price_cache.json`,
+>    cada ASIN se resuelve una vez en la vida) → 3. **Amazon best-effort**
+>    (prueba `amazon.es` y `amazon.de`, ambos EUR; lo bloqueado se reintenta
+>    solo en la siguiente pasada, nunca se "quema"; solo verifica los top-N
+>    sospechosos por valor para gastar poco).
+> 4. **Búsqueda web por mí**: cuando me pides un estudio, busco a mano los que
+>    falten y los escribo en la caché compartida:
+>    `python -m liquidation_tracker.cli prime-prices --set B0XXX=1046,B0YYY=700`
+>    (o `--file precios.json`). La siguiente pasada automática ya los tiene.
+>
+> Una "búsqueda web normal" programática (Google/Bing) se bloquea igual que
+> Amazon y Bing ya no tiene API gratis, así que no compensa montarla: el puente
+> caché + mis búsquedas cubre ese hueco con mejor calidad y coste cero.
+>
 > Lo que sigue abajo es el estado anterior (contexto histórico); los puntos 4,
 > 5, 6 y 7 quedan resueltos por lo de arriba.
 
