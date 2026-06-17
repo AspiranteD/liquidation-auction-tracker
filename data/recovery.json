@@ -1,145 +1,135 @@
 {
- "generated": "2026-06-17T09:57:34",
+ "generated": "2026-06-17T10:54:33",
  "min_sample": 30,
- "global": 0.241,
+ "matured_days": 365,
+ "as_of": "2026-06-17",
+ "global": 0.2751,
  "by_department": {
   "#N/A": {
-   "recovery": 0.4737,
-   "n": 2
+   "recovery": 0.4915,
+   "n": 1
   },
   "Apparel": {
-   "recovery": 0.0974,
-   "n": 17
+   "recovery": 0.1533,
+   "n": 10
   },
   "Automotive": {
-   "recovery": 0.2103,
-   "n": 3703
+   "recovery": 0.279,
+   "n": 1624
   },
   "BISS": {
-   "recovery": 0.2735,
-   "n": 1891
+   "recovery": 0.3503,
+   "n": 801
   },
   "Baby Product": {
-   "recovery": 0.3373,
-   "n": 1534
+   "recovery": 0.3362,
+   "n": 571
   },
   "Beauty": {
    "recovery": 0.0,
-   "n": 8
+   "n": 5
   },
   "Camera": {
-   "recovery": 0.2072,
-   "n": 313
+   "recovery": 0.3071,
+   "n": 228
   },
   "DVD": {
-   "recovery": 0.2445,
-   "n": 142
-  },
-  "Digital Accessories": {
-   "recovery": 0.0,
-   "n": 1
+   "recovery": 0.3093,
+   "n": 109
   },
   "Drugstore": {
-   "recovery": 0.0878,
-   "n": 6
+   "recovery": 0.2433,
+   "n": 2
   },
   "Electronics": {
-   "recovery": 0.1919,
-   "n": 3241
-  },
-  "Fresh Ambient": {
-   "recovery": 0.0,
-   "n": 1
+   "recovery": 0.2359,
+   "n": 2392
   },
   "Furniture": {
-   "recovery": 0.3742,
-   "n": 146
+   "recovery": 0.3722,
+   "n": 106
   },
   "Home": {
-   "recovery": 0.3002,
-   "n": 4079
+   "recovery": 0.3187,
+   "n": 2457
   },
   "Home Entertainment": {
-   "recovery": 0.0935,
-   "n": 198
+   "recovery": 0.1244,
+   "n": 150
   },
   "Home Improvement": {
-   "recovery": 0.2601,
-   "n": 5459
-  },
-  "Jewelry": {
-   "recovery": 0.0,
-   "n": 1
+   "recovery": 0.3076,
+   "n": 2364
   },
   "Kitchen": {
-   "recovery": 0.2494,
-   "n": 1728
+   "recovery": 0.2515,
+   "n": 1632
   },
   "Lawn and Garden": {
-   "recovery": 0.3898,
-   "n": 550
+   "recovery": 0.4123,
+   "n": 430
   },
   "Luggage": {
-   "recovery": 0.3486,
-   "n": 9
+   "recovery": 0.5361,
+   "n": 3
   },
   "Major Appliances": {
-   "recovery": 0.4316,
-   "n": 80
+   "recovery": 0.4329,
+   "n": 79
   },
   "Musical Instruments": {
-   "recovery": 0.4352,
-   "n": 360
+   "recovery": 0.4414,
+   "n": 354
   },
   "Office Product": {
-   "recovery": 0.1659,
-   "n": 1760
+   "recovery": 0.2192,
+   "n": 1154
   },
   "PC": {
-   "recovery": 0.1681,
-   "n": 1464
+   "recovery": 0.4229,
+   "n": 892
   },
   "Personal Care Appliances": {
-   "recovery": 0.2954,
-   "n": 1177
+   "recovery": 0.2955,
+   "n": 1176
   },
   "Pet Products": {
-   "recovery": 0.3576,
-   "n": 769
+   "recovery": 0.3865,
+   "n": 454
   },
   "Sports": {
-   "recovery": 0.0693,
-   "n": 48
+   "recovery": 0.214,
+   "n": 18
   },
   "Tools": {
    "recovery": 0.0,
    "n": 3
   },
   "Toy": {
-   "recovery": 0.2443,
-   "n": 4532
+   "recovery": 0.2454,
+   "n": 4504
   },
   "Video Games": {
-   "recovery": 0.1014,
-   "n": 2
+   "recovery": 0.0,
+   "n": 1
   },
   "Wireless": {
-   "recovery": 0.1331,
-   "n": 1593
+   "recovery": 0.1859,
+   "n": 1169
   }
  },
  "by_category": {
   "#N/A": {
-   "recovery": 0.4737,
-   "n": 2
+   "recovery": 0.4915,
+   "n": 1
   },
   "Accessories": {
-   "recovery": 0.1648,
-   "n": 1076
+   "recovery": 0.2678,
+   "n": 740
   },
   "Accessories (audio/Video/TV)": {
-   "recovery": 0.1518,
-   "n": 11
+   "recovery": 0.1774,
+   "n": 9
   },
   "Accessories (camera)": {
    "recovery": 0.0,
@@ -147,107 +137,103 @@
   },
   "Accessories (communication/GPS)": {
    "recovery": 0.0,
-   "n": 3
+   "n": 2
   },
   "Accessories Nintendo Ds": {
    "recovery": 0.0,
-   "n": 3
+   "n": 2
   },
   "Accessories Other": {
    "recovery": 0.0,
    "n": 3
   },
   "Action Cams": {
-   "recovery": 0.1224,
-   "n": 10
+   "recovery": 0.172,
+   "n": 6
   },
   "Action Figures & Accessories": {
-   "recovery": 0.301,
-   "n": 524
+   "recovery": 0.3048,
+   "n": 520
   },
   "Activity Entertainment": {
-   "recovery": 0.2896,
-   "n": 31
-  },
-  "Additive Manufacturing": {
-   "recovery": 0.4415,
-   "n": 21
-  },
-  "Adult Craft": {
-   "recovery": 0.1348,
-   "n": 33
-  },
-  "All Other": {
-   "recovery": 0.212,
-   "n": 614
-  },
-  "Apparel & Leashes": {
-   "recovery": 0.2335,
-   "n": 69
-  },
-  "Appearance Chemicals": {
-   "recovery": 0.253,
-   "n": 60
-  },
-  "Aquaristics and Terraristics": {
-   "recovery": 0.3703,
-   "n": 79
-  },
-  "Art": {
-   "recovery": 0.3341,
+   "recovery": 0.3039,
    "n": 8
   },
-  "Arts, Crafts & School Supplies": {
-   "recovery": 0.1871,
-   "n": 213
+  "Additive Manufacturing": {
+   "recovery": 0.4231,
+   "n": 9
   },
-  "Arts, Crafts & Sewing": {
-   "recovery": 0.3604,
-   "n": 151
+  "Adult Craft": {
+   "recovery": 0.1774,
+   "n": 24
   },
-  "Athletic Sports Apparel": {
-   "recovery": 0.1052,
-   "n": 4
+  "All Other": {
+   "recovery": 0.2129,
+   "n": 611
   },
-  "Audio": {
-   "recovery": 0.329,
-   "n": 22
+  "Apparel & Leashes": {
+   "recovery": 0.2827,
+   "n": 35
   },
-  "Audio Receivers": {
-   "recovery": 0.1033,
-   "n": 48
+  "Appearance Chemicals": {
+   "recovery": 0.2802,
+   "n": 27
   },
-  "Audio Speakers": {
-   "recovery": 0.1806,
-   "n": 56
+  "Aquaristics and Terraristics": {
+   "recovery": 0.3874,
+   "n": 50
   },
-  "Automobile": {
-   "recovery": 0.2405,
-   "n": 10
-  },
-  "Automotive": {
-   "recovery": 0.2651,
-   "n": 2
-  },
-  "Automotive Accessories": {
-   "recovery": 0.3097,
-   "n": 231
-  },
-  "Automotive Equipment & Tools": {
-   "recovery": 0.3801,
-   "n": 254
-  },
-  "Baby Accessories": {
-   "recovery": 0.1397,
-   "n": 7
-  },
-  "Baby Care": {
-   "recovery": 0.0,
+  "Art": {
+   "recovery": 0.2282,
    "n": 3
   },
+  "Arts, Crafts & School Supplies": {
+   "recovery": 0.1872,
+   "n": 205
+  },
+  "Arts, Crafts & Sewing": {
+   "recovery": 0.3902,
+   "n": 102
+  },
+  "Athletic Sports Apparel": {
+   "recovery": 0.2612,
+   "n": 2
+  },
+  "Audio": {
+   "recovery": 0.336,
+   "n": 21
+  },
+  "Audio Receivers": {
+   "recovery": 0.2775,
+   "n": 23
+  },
+  "Audio Speakers": {
+   "recovery": 0.2437,
+   "n": 35
+  },
+  "Automobile": {
+   "recovery": 0.1564,
+   "n": 6
+  },
+  "Automotive": {
+   "recovery": 0.2108,
+   "n": 1
+  },
+  "Automotive Accessories": {
+   "recovery": 0.3501,
+   "n": 112
+  },
+  "Automotive Equipment & Tools": {
+   "recovery": 0.3997,
+   "n": 135
+  },
+  "Baby Accessories": {
+   "recovery": 0.1579,
+   "n": 6
+  },
   "Baby Clothing": {
-   "recovery": 0.1447,
-   "n": 19
+   "recovery": 0.2743,
+   "n": 4
   },
   "Baby Misc": {
    "recovery": 0.382,
@@ -258,108 +244,108 @@
    "n": 1
   },
   "Babyphones & Safety": {
-   "recovery": 0.3263,
-   "n": 115
+   "recovery": 0.3091,
+   "n": 53
   },
   "Bag & Pocket Accessories": {
    "recovery": 0.0,
-   "n": 4
+   "n": 1
   },
   "Bakeware": {
-   "recovery": 0.1843,
-   "n": 68
+   "recovery": 0.1824,
+   "n": 45
   },
   "Basic Supplies": {
-   "recovery": 0.0748,
-   "n": 115
+   "recovery": 0.0832,
+   "n": 76
   },
   "Bath & Shower": {
-   "recovery": 0.3338,
-   "n": 3
+   "recovery": 0.2048,
+   "n": 1
   },
   "Bathing & Skin Care": {
-   "recovery": 0.2172,
-   "n": 114
+   "recovery": 0.2568,
+   "n": 48
   },
   "Bathroom Furniture": {
-   "recovery": 0.2853,
-   "n": 3
+   "recovery": 0.9866,
+   "n": 1
   },
   "Batteries": {
-   "recovery": 0.2828,
-   "n": 11
+   "recovery": 0.3141,
+   "n": 9
   },
   "Bedding": {
-   "recovery": 0.3118,
-   "n": 93
+   "recovery": 0.3577,
+   "n": 39
   },
   "Bedroom Furniture": {
-   "recovery": 0.3747,
-   "n": 119
+   "recovery": 0.3842,
+   "n": 106
   },
   "Birds & Wildlife": {
    "recovery": 0.2833,
    "n": 2
   },
   "Blu-Ray & DVD Players": {
-   "recovery": 0.2066,
-   "n": 10
+   "recovery": 0.3083,
+   "n": 7
   },
   "Body, Trim & Crash Parts": {
-   "recovery": 0.2104,
-   "n": 168
+   "recovery": 0.2567,
+   "n": 88
   },
   "Buildin Kitchens": {
    "recovery": 0.4974,
    "n": 3
   },
   "Building Material": {
-   "recovery": 0.2609,
-   "n": 148
+   "recovery": 0.3434,
+   "n": 59
   },
   "Building Sets": {
    "recovery": 0.4226,
    "n": 186
   },
   "Cables": {
-   "recovery": 0.0891,
-   "n": 198
+   "recovery": 0.1106,
+   "n": 143
   },
   "Cameras": {
    "recovery": 0.3245,
    "n": 2
   },
   "Camping & Outdoor": {
-   "recovery": 0.4789,
-   "n": 2
+   "recovery": 0.9626,
+   "n": 1
   },
   "Car Electronics": {
-   "recovery": 0.2526,
-   "n": 46
+   "recovery": 0.2791,
+   "n": 30
   },
   "Car Seats & Accessories": {
-   "recovery": 0.4404,
-   "n": 142
+   "recovery": 0.4606,
+   "n": 37
   },
   "Caravanning & Campers": {
-   "recovery": 0.2313,
-   "n": 60
+   "recovery": 0.265,
+   "n": 25
   },
   "Childrens Furniture": {
-   "recovery": 0.3968,
-   "n": 7
+   "recovery": 0.4694,
+   "n": 5
   },
   "Classic Car Parts": {
    "recovery": 0.5092,
    "n": 3
   },
   "Components": {
-   "recovery": 0.1742,
-   "n": 169
+   "recovery": 0.2794,
+   "n": 95
   },
   "Computer Peripherals": {
-   "recovery": 0.3118,
-   "n": 9
+   "recovery": 0.341,
+   "n": 6
   },
   "Consoles": {
    "recovery": 0.1213,
@@ -370,236 +356,228 @@
    "n": 71
   },
   "Cookware": {
-   "recovery": 0.3873,
-   "n": 242
+   "recovery": 0.3872,
+   "n": 159
   },
   "Cutlery & Knives": {
-   "recovery": 0.3542,
-   "n": 59
+   "recovery": 0.3728,
+   "n": 38
   },
   "Cycling": {
-   "recovery": 0.2359,
-   "n": 18
+   "recovery": 0.2212,
+   "n": 7
   },
   "Decorating": {
-   "recovery": 0.1674,
-   "n": 127
+   "recovery": 0.3003,
+   "n": 54
   },
   "Desktops": {
-   "recovery": 0.2195,
-   "n": 10
+   "recovery": 0.337,
+   "n": 6
   },
   "Diapering": {
-   "recovery": 0.3135,
-   "n": 65
+   "recovery": 0.2985,
+   "n": 25
   },
   "Dishwashers": {
    "recovery": 0.0,
-   "n": 2
+   "n": 1
   },
   "Dj and Lighting": {
-   "recovery": 0.472,
-   "n": 41
+   "recovery": 0.4711,
+   "n": 40
   },
   "Dolls": {
-   "recovery": 0.2884,
-   "n": 328
+   "recovery": 0.2929,
+   "n": 322
   },
   "Drums and Percussion": {
    "recovery": 0.3553,
    "n": 14
   },
   "Dvc": {
-   "recovery": 0.2575,
-   "n": 9
+   "recovery": 0.3098,
+   "n": 6
   },
   "E-Cigarettes, Heated Tobacco, Shisha & Accessories": {
    "recovery": 0.0,
    "n": 2
   },
   "Education Supplies": {
-   "recovery": 0.0962,
-   "n": 28
-  },
-  "Educational Supplies": {
-   "recovery": 0.2457,
-   "n": 38
-  },
-  "Electric Cookware": {
-   "recovery": 0.2969,
-   "n": 197
-  },
-  "Electrical": {
-   "recovery": 0.2486,
-   "n": 603
-  },
-  "Entryway Furniture": {
-   "recovery": 0.5781,
-   "n": 7
-  },
-  "Ev Parts & Accessories": {
-   "recovery": 0.1627,
-   "n": 11
-  },
-  "Exercise & Fitness": {
-   "recovery": 0.4723,
-   "n": 5
-  },
-  "Farm & Smallholding": {
-   "recovery": 0.2174,
+   "recovery": 0.111,
    "n": 19
   },
+  "Educational Supplies": {
+   "recovery": 0.2996,
+   "n": 27
+  },
+  "Electric Cookware": {
+   "recovery": 0.3025,
+   "n": 186
+  },
+  "Electrical": {
+   "recovery": 0.3257,
+   "n": 270
+  },
+  "Entryway Furniture": {
+   "recovery": 0.0674,
+   "n": 3
+  },
+  "Ev Parts & Accessories": {
+   "recovery": 0.1253,
+   "n": 4
+  },
+  "Exercise & Fitness": {
+   "recovery": 0.5777,
+   "n": 2
+  },
+  "Farm & Smallholding": {
+   "recovery": 0.4062,
+   "n": 8
+  },
   "Farm Animals": {
-   "recovery": 0.3098,
-   "n": 7
+   "recovery": 0.3841,
+   "n": 6
   },
   "Fashion Shoes-Men": {
    "recovery": 0.0,
-   "n": 2
-  },
-  "Fashion Shoes-Unisex Adults": {
-   "recovery": 0.5642,
    "n": 1
   },
   "Fasteners": {
-   "recovery": 0.5555,
-   "n": 3
+   "recovery": 0.2771,
+   "n": 2
   },
   "Feeding": {
-   "recovery": 0.1526,
-   "n": 330
+   "recovery": 0.1902,
+   "n": 130
   },
   "Film": {
-   "recovery": 0.2891,
-   "n": 43
+   "recovery": 0.3713,
+   "n": 29
   },
   "Fire Alarms & Security": {
-   "recovery": 0.278,
-   "n": 314
+   "recovery": 0.3421,
+   "n": 130
   },
   "Floorcare": {
-   "recovery": 0.1752,
-   "n": 369
+   "recovery": 0.175,
+   "n": 365
   },
   "Floorcare Accessories": {
-   "recovery": 0.3779,
-   "n": 30
+   "recovery": 0.3929,
+   "n": 26
   },
   "Flooring": {
-   "recovery": 0.0424,
-   "n": 7
+   "recovery": 0.0,
+   "n": 1
   },
   "Flow Control & Filtration": {
-   "recovery": 0.6039,
-   "n": 12
+   "recovery": 0.5766,
+   "n": 6
   },
   "Fluid Transfer": {
    "recovery": 0.0,
    "n": 1
   },
   "Food Preparation": {
-   "recovery": 0.2774,
-   "n": 211
+   "recovery": 0.282,
+   "n": 200
   },
   "Food Preparation Accessories": {
-   "recovery": 0.2784,
-   "n": 57
+   "recovery": 0.2882,
+   "n": 49
   },
   "Food Service": {
-   "recovery": 0.2963,
-   "n": 149
+   "recovery": 0.3565,
+   "n": 60
   },
   "Furnaces": {
-   "recovery": 0.2801,
-   "n": 38
+   "recovery": 0.4325,
+   "n": 9
   },
   "Furniture": {
-   "recovery": 0.3144,
-   "n": 169
+   "recovery": 0.3718,
+   "n": 52
   },
   "Games": {
    "recovery": 0.0,
    "n": 4
   },
   "Games & Puzzles": {
-   "recovery": 0.1691,
-   "n": 584
+   "recovery": 0.1693,
+   "n": 579
   },
   "Games Room & Leisure": {
-   "recovery": 0.1652,
-   "n": 4
+   "recovery": 0.249,
+   "n": 2
   },
   "Garden & Landscaping Tools": {
-   "recovery": 0.3351,
-   "n": 165
+   "recovery": 0.3769,
+   "n": 65
   },
   "Gardening Equipment & Storage": {
-   "recovery": 0.4747,
-   "n": 68
+   "recovery": 0.4627,
+   "n": 55
   },
   "Gardening Tools & Accessories": {
-   "recovery": 0.3173,
-   "n": 40
+   "recovery": 0.2406,
+   "n": 27
   },
   "Gear": {
-   "recovery": 0.2905,
-   "n": 63
-  },
-  "Gents Wrist Watch": {
-   "recovery": 0.0,
-   "n": 1
+   "recovery": 0.4115,
+   "n": 15
   },
   "Gifts, Decor & All Other": {
-   "recovery": 0.1508,
-   "n": 82
+   "recovery": 0.1737,
+   "n": 51
   },
   "Grilling": {
-   "recovery": 0.5232,
-   "n": 23
+   "recovery": 0.5262,
+   "n": 21
   },
   "Grooming": {
-   "recovery": 0.3176,
-   "n": 14
+   "recovery": 0.3396,
+   "n": 8
   },
   "Habitats & Supplies": {
-   "recovery": 0.4043,
-   "n": 221
+   "recovery": 0.3985,
+   "n": 150
   },
   "Hair Care & Styling": {
-   "recovery": 0.2763,
-   "n": 10
+   "recovery": 0.2845,
+   "n": 9
   },
   "Hair Care Appliances": {
    "recovery": 0.246,
    "n": 239
   },
   "Hand Tools": {
-   "recovery": 0.3122,
-   "n": 599
+   "recovery": 0.3933,
+   "n": 301
   },
   "Handsfree": {
-   "recovery": 0.3283,
-   "n": 11
+   "recovery": 0.3777,
+   "n": 7
   },
   "Hardware": {
-   "recovery": 0.1591,
-   "n": 826
+   "recovery": 0.1916,
+   "n": 361
   },
   "Headphones": {
-   "recovery": 0.1624,
-   "n": 954
+   "recovery": 0.2029,
+   "n": 723
   },
   "Health Care": {
-   "recovery": 0.3819,
-   "n": 19
+   "recovery": 0.443,
+   "n": 9
   },
   "Heaters and Fans": {
-   "recovery": 0.1987,
-   "n": 233
+   "recovery": 0.3182,
+   "n": 80
   },
   "Home Decor": {
-   "recovery": 0.2663,
-   "n": 393
+   "recovery": 0.2875,
+   "n": 247
   },
   "Home Entertainment": {
    "recovery": 0.0967,
@@ -610,203 +588,179 @@
    "n": 1
   },
   "Home Environment": {
-   "recovery": 0.3145,
-   "n": 275
+   "recovery": 0.3185,
+   "n": 249
   },
   "Home Office Furniture": {
-   "recovery": 0.2572,
-   "n": 10
-  },
-  "Home Theater Projectors": {
-   "recovery": 0.0,
-   "n": 1
+   "recovery": 0.3182,
+   "n": 3
   },
   "Horses": {
-   "recovery": 0.3798,
-   "n": 7
+   "recovery": 0.4234,
+   "n": 6
   },
   "Hot Beverage Makers": {
-   "recovery": 0.3531,
-   "n": 191
+   "recovery": 0.3603,
+   "n": 181
   },
   "Hot Beverage Makers Accessories": {
-   "recovery": 0.387,
-   "n": 35
+   "recovery": 0.3831,
+   "n": 24
   },
   "Household Consumables": {
-   "recovery": 0.2054,
-   "n": 8
+   "recovery": 0.3815,
+   "n": 5
   },
   "Housewares": {
-   "recovery": 0.2542,
-   "n": 1005
-  },
-  "Ilc": {
-   "recovery": 0.0,
-   "n": 2
+   "recovery": 0.2669,
+   "n": 602
   },
   "Industrial Electrical Supplies": {
-   "recovery": 0.1631,
-   "n": 152
+   "recovery": 0.2344,
+   "n": 53
   },
   "Industrial Tools & Instruments": {
-   "recovery": 0.2181,
-   "n": 75
+   "recovery": 0.4377,
+   "n": 38
   },
   "Infants/Preschool": {
-   "recovery": 0.1828,
-   "n": 232
+   "recovery": 0.19,
+   "n": 225
   },
   "Ironing": {
-   "recovery": 0.1815,
-   "n": 126
+   "recovery": 0.1985,
+   "n": 101
   },
   "Janitorial & Sanitation": {
-   "recovery": 0.1961,
-   "n": 52
+   "recovery": 0.1883,
+   "n": 30
   },
   "Keyboards and Pianos": {
    "recovery": 0.5097,
    "n": 22
   },
-  "Kitchen Furniture": {
-   "recovery": 0.4707,
-   "n": 3
-  },
   "Lab Equipment & Instruments": {
-   "recovery": 0.3747,
-   "n": 51
+   "recovery": 0.3985,
+   "n": 25
   },
   "Labware, Consumables & Furniture": {
-   "recovery": 0.2807,
-   "n": 16
-  },
-  "Ladies Wrist Watch": {
-   "recovery": 0.0,
-   "n": 1
-  },
-  "Laptop and PC": {
-   "recovery": 0.0,
-   "n": 1
+   "recovery": 0.4139,
+   "n": 10
   },
   "Laptops": {
-   "recovery": 0.5901,
-   "n": 24
+   "recovery": 6.4261,
+   "n": 10
   },
   "Laundry": {
-   "recovery": 0.1918,
-   "n": 4
-  },
-  "Learning & Exploration": {
-   "recovery": 0.2432,
-   "n": 447
-  },
-  "Lenses": {
-   "recovery": 0.0236,
-   "n": 5
-  },
-  "Licensed": {
-   "recovery": 0.358,
-   "n": 3
-  },
-  "Lifestyle": {
-   "recovery": 0.0323,
-   "n": 6
-  },
-  "Lighting": {
-   "recovery": 0.2439,
-   "n": 388
-  },
-  "Linens": {
-   "recovery": 0.2622,
-   "n": 635
-  },
-  "Living Room Furniture": {
-   "recovery": 0.3179,
-   "n": 7
-  },
-  "Luggage": {
-   "recovery": 0.2567,
+   "recovery": 0.2324,
    "n": 2
   },
+  "Learning & Exploration": {
+   "recovery": 0.2436,
+   "n": 446
+  },
+  "Lenses": {
+   "recovery": 0.0813,
+   "n": 3
+  },
+  "Licensed": {
+   "recovery": 0.4806,
+   "n": 2
+  },
+  "Lifestyle": {
+   "recovery": 0.0469,
+   "n": 3
+  },
+  "Lighting": {
+   "recovery": 0.2464,
+   "n": 236
+  },
+  "Linens": {
+   "recovery": 0.3068,
+   "n": 417
+  },
+  "Living Room Furniture": {
+   "recovery": 0.3732,
+   "n": 4
+  },
+  "Luggage": {
+   "recovery": 0.3128,
+   "n": 1
+  },
   "Make-Up": {
-   "recovery": 0.2612,
-   "n": 8
+   "recovery": 0.0,
+   "n": 2
   },
   "Maps, Posters & Charts": {
-   "recovery": 0.272,
-   "n": 44
+   "recovery": 0.2959,
+   "n": 37
   },
   "Marine": {
-   "recovery": 0.2487,
-   "n": 10
+   "recovery": 0.3909,
+   "n": 3
   },
   "Massage & Relaxation Appliances": {
    "recovery": 0.3126,
    "n": 116
   },
   "Material Handling": {
-   "recovery": 0.2034,
-   "n": 40
+   "recovery": 0.1619,
+   "n": 8
   },
   "Mattresses & Bed Sets": {
    "recovery": 0.2509,
    "n": 2
   },
   "Mattresses & Mattress Frames": {
-   "recovery": 0.4034,
-   "n": 24
+   "recovery": 0.2719,
+   "n": 9
   },
   "Measurement": {
-   "recovery": 0.3699,
-   "n": 39
+   "recovery": 0.3974,
+   "n": 14
   },
   "Medical Appliances": {
-   "recovery": 0.3348,
-   "n": 186
+   "recovery": 0.3399,
+   "n": 180
   },
   "Memory": {
-   "recovery": 0.3915,
-   "n": 125
+   "recovery": 0.3269,
+   "n": 88
   },
   "Men's Bottoms": {
    "recovery": 0.0,
-   "n": 2
+   "n": 1
   },
   "Men's Outerwear": {
-   "recovery": 0.2932,
-   "n": 6
+   "recovery": 0.0,
+   "n": 1
   },
   "Men's Sleepwear": {
    "recovery": 0.0,
-   "n": 4
+   "n": 3
   },
   "Men's Swimwear": {
    "recovery": 0.0,
-   "n": 3
+   "n": 1
   },
   "Metalworking": {
-   "recovery": 0.3899,
-   "n": 53
+   "recovery": 0.317,
+   "n": 26
   },
   "Monitors": {
-   "recovery": 0.0267,
-   "n": 22
+   "recovery": 0.1265,
+   "n": 8
   },
   "Motorbike Accessories & Parts": {
-   "recovery": 0.2279,
-   "n": 216
+   "recovery": 0.3266,
+   "n": 100
   },
   "Motorcycle Clothing & Helmets": {
-   "recovery": 0.3153,
-   "n": 70
+   "recovery": 0.4578,
+   "n": 30
   },
   "Motorcycles, Scooters & Atvs": {
    "recovery": 0.7152,
-   "n": 1
-  },
-  "Nail Care": {
-   "recovery": 0.0,
    "n": 1
   },
   "Nail Care Appliances": {
@@ -814,32 +768,32 @@
    "n": 4
   },
   "Navigation Electronics": {
-   "recovery": 0.2474,
-   "n": 76
+   "recovery": 0.4295,
+   "n": 46
   },
   "Networking": {
-   "recovery": 0.1005,
-   "n": 92
+   "recovery": 0.1997,
+   "n": 68
   },
   "Nursery Decor": {
-   "recovery": 0.1948,
-   "n": 21
+   "recovery": 0.1764,
+   "n": 10
   },
   "Occupational Health & Safety": {
-   "recovery": 0.1653,
-   "n": 233
+   "recovery": 0.2187,
+   "n": 133
   },
   "Office Furniture": {
-   "recovery": 0.0976,
-   "n": 3
+   "recovery": 0.1474,
+   "n": 2
   },
   "Office Organization": {
-   "recovery": 0.143,
-   "n": 164
+   "recovery": 0.227,
+   "n": 110
   },
   "Office Supplies": {
-   "recovery": 0.1361,
-   "n": 514
+   "recovery": 0.1816,
+   "n": 316
   },
   "Optics": {
    "recovery": 0.0,
@@ -847,183 +801,175 @@
   },
   "Oral Care": {
    "recovery": 0.0,
-   "n": 3
+   "n": 1
   },
   "Oral Care Appliances": {
    "recovery": 0.2966,
    "n": 186
   },
   "Other": {
-   "recovery": 0.218,
-   "n": 23
+   "recovery": 0.2092,
+   "n": 8
   },
   "Other Accessories": {
-   "recovery": 0.1637,
-   "n": 485
+   "recovery": 0.2348,
+   "n": 356
   },
   "Other Audio Components": {
-   "recovery": 0.2427,
-   "n": 198
+   "recovery": 0.2815,
+   "n": 159
   },
   "Outdoor & Sports Toys": {
-   "recovery": 0.316,
-   "n": 102
+   "recovery": 0.307,
+   "n": 98
   },
   "Outdoor Decor & Lighting": {
-   "recovery": 0.3837,
-   "n": 25
+   "recovery": 0.3841,
+   "n": 22
   },
   "Outdoor Furniture": {
-   "recovery": 0.4193,
-   "n": 54
+   "recovery": 0.4251,
+   "n": 45
   },
   "Outdoor Living": {
-   "recovery": 0.438,
-   "n": 33
+   "recovery": 0.5304,
+   "n": 22
   },
   "Outdoor Sports Apparel": {
    "recovery": 0.3201,
    "n": 1
   },
   "Outdoors": {
-   "recovery": 0.282,
-   "n": 37
+   "recovery": 0.2501,
+   "n": 24
   },
   "PBE, Oils and Fluids": {
-   "recovery": 0.2133,
-   "n": 95
+   "recovery": 0.2903,
+   "n": 33
   },
   "Paper, Envelopes and Shipping Supplies": {
-   "recovery": 0.1338,
-   "n": 94
+   "recovery": 0.1458,
+   "n": 76
   },
   "Performance Modification & Customization": {
-   "recovery": 0.1085,
-   "n": 281
+   "recovery": 0.1742,
+   "n": 132
   },
   "Pet Food": {
-   "recovery": 0.0835,
-   "n": 27
+   "recovery": 0.3592,
+   "n": 2
   },
   "Photo Printers & Scanners": {
-   "recovery": 0.343,
-   "n": 38
+   "recovery": 0.3878,
+   "n": 26
   },
   "Plant Care & Pest Control": {
-   "recovery": 0.3783,
-   "n": 53
+   "recovery": 0.397,
+   "n": 36
   },
   "Plumbing and Bath": {
-   "recovery": 0.1906,
-   "n": 728
+   "recovery": 0.2164,
+   "n": 321
   },
   "Plush": {
-   "recovery": 0.1544,
-   "n": 193
+   "recovery": 0.1555,
+   "n": 191
   },
   "Point & Shoot": {
-   "recovery": 0.0439,
-   "n": 4
+   "recovery": 0.5385,
+   "n": 2
   },
   "Pool & Spa": {
-   "recovery": 0.2714,
-   "n": 63
+   "recovery": 0.3542,
+   "n": 40
   },
   "Portable Electronics": {
-   "recovery": 0.1768,
-   "n": 16
+   "recovery": 0.2134,
+   "n": 12
   },
   "Portable Media Players": {
-   "recovery": 0.1972,
-   "n": 31
+   "recovery": 0.2421,
+   "n": 25
   },
   "Potty Training": {
-   "recovery": 0.4668,
-   "n": 28
+   "recovery": 0.4114,
+   "n": 7
   },
   "Power": {
-   "recovery": 0.1489,
-   "n": 54
+   "recovery": 0.231,
+   "n": 29
   },
   "Power Tool Accessories": {
-   "recovery": 0.2788,
-   "n": 285
+   "recovery": 0.3207,
+   "n": 146
   },
   "Power Tools": {
-   "recovery": 0.3779,
-   "n": 405
+   "recovery": 0.3287,
+   "n": 170
   },
   "Power Transmission": {
-   "recovery": 0.2479,
-   "n": 19
+   "recovery": 0.1103,
+   "n": 8
   },
   "Prams, Strollers, Carriers": {
-   "recovery": 0.4261,
-   "n": 117
+   "recovery": 0.4186,
+   "n": 42
   },
   "Presentation Systems": {
-   "recovery": 0.3344,
-   "n": 15
+   "recovery": 0.3558,
+   "n": 13
   },
   "Printing Consumables": {
-   "recovery": 0.1819,
-   "n": 232
+   "recovery": 0.254,
+   "n": 154
   },
   "Printing Hardware": {
-   "recovery": 0.2507,
-   "n": 46
-  },
-  "Professional Dental": {
-   "recovery": 0.3411,
-   "n": 6
+   "recovery": 0.2982,
+   "n": 33
   },
   "Professional Medical": {
-   "recovery": 0.417,
-   "n": 129
+   "recovery": 0.4954,
+   "n": 64
   },
   "Raw Materials": {
    "recovery": 0.0,
    "n": 1
   },
   "Refrigeration": {
-   "recovery": 0.409,
-   "n": 12
+   "recovery": 0.4476,
+   "n": 8
   },
   "Renewable Energy Supplies": {
-   "recovery": 0.4975,
-   "n": 10
+   "recovery": 0.5192,
+   "n": 4
   },
   "Rowing": {
    "recovery": 0.6411,
    "n": 1
   },
   "Rugs": {
-   "recovery": 0.5493,
-   "n": 3
+   "recovery": 0.4056,
+   "n": 2
   },
   "Security": {
-   "recovery": 0.1753,
-   "n": 6
+   "recovery": 0.162,
+   "n": 2
   },
   "Seeds & Plants": {
-   "recovery": 0.4605,
-   "n": 5
-  },
-  "Services": {
-   "recovery": 0.1313,
-   "n": 5
+   "recovery": 0.3222,
+   "n": 3
   },
   "Set-Top Boxes": {
-   "recovery": 0.1978,
-   "n": 61
+   "recovery": 0.2045,
+   "n": 58
   },
   "Shaving & Hair Removal Appliances": {
-   "recovery": 0.3106,
-   "n": 357
+   "recovery": 0.3103,
+   "n": 356
   },
   "Skin Care": {
-   "recovery": 0.1595,
-   "n": 5
+   "recovery": 0.3019,
+   "n": 2
   },
   "Skin Care Appliances": {
    "recovery": 0.2966,
@@ -1033,181 +979,169 @@
    "recovery": 0.322,
    "n": 6
   },
-  "Snow": {
-   "recovery": 0.5731,
+  "Snow Removal": {
+   "recovery": 0.0,
    "n": 1
   },
-  "Snow Removal": {
-   "recovery": 0.3597,
-   "n": 2
-  },
   "Sound and Recording": {
-   "recovery": 0.5283,
-   "n": 70
+   "recovery": 0.5499,
+   "n": 68
   },
   "Spare & Repair Parts Car & Truck": {
-   "recovery": 0.123,
-   "n": 1056
+   "recovery": 0.1863,
+   "n": 441
   },
   "Sports Medicine": {
-   "recovery": 0.098,
-   "n": 4
+   "recovery": 0.5885,
+   "n": 1
   },
   "Sports Other": {
    "recovery": 0.4227,
    "n": 1
   },
   "Sports Technology": {
-   "recovery": 0.0826,
-   "n": 25
+   "recovery": 0.1272,
+   "n": 6
   },
   "Storage": {
-   "recovery": 0.1025,
-   "n": 66
+   "recovery": 0.2266,
+   "n": 35
   },
   "Streaming Media Players": {
-   "recovery": 0.372,
-   "n": 29
+   "recovery": 0.4435,
+   "n": 24
   },
   "Street": {
-   "recovery": 0.3235,
-   "n": 8
+   "recovery": 0.4537,
+   "n": 5
   },
   "Stringed Instruments": {
    "recovery": 0.5018,
    "n": 7
   },
   "Structures & Ponds": {
-   "recovery": 0.2866,
-   "n": 10
-  },
-  "Swimming": {
-   "recovery": 0.0,
-   "n": 1
+   "recovery": 0.3388,
+   "n": 6
   },
   "TV Audio": {
-   "recovery": 0.2898,
-   "n": 5
-  },
-  "Tabletop": {
-   "recovery": 0.287,
-   "n": 188
-  },
-  "Tablets": {
-   "recovery": 0.0076,
-   "n": 10
-  },
-  "Tapes, Adhesives, Lubricants & Chemicals": {
-   "recovery": 0.1905,
-   "n": 41
-  },
-  "Team & Racket Sports": {
-   "recovery": 0.3274,
+   "recovery": 0.3418,
    "n": 4
   },
+  "Tabletop": {
+   "recovery": 0.3049,
+   "n": 116
+  },
+  "Tablets": {
+   "recovery": 1.1603,
+   "n": 1
+  },
+  "Tapes, Adhesives, Lubricants & Chemicals": {
+   "recovery": 0.249,
+   "n": 23
+  },
+  "Team & Racket Sports": {
+   "recovery": 0.095,
+   "n": 3
+  },
   "Televisions": {
-   "recovery": 0.0637,
-   "n": 79
+   "recovery": 0.0669,
+   "n": 44
   },
   "Tires & Rims": {
-   "recovery": 0.0937,
-   "n": 36
+   "recovery": 0.2657,
+   "n": 11
   },
   "Toasters, Waffle & Crepe Makers": {
-   "recovery": 0.2232,
-   "n": 65
+   "recovery": 0.2487,
+   "n": 57
   },
   "Tools & Accessories": {
    "recovery": 0.0,
-   "n": 4
+   "n": 1
   },
   "Tools, Gadgets & Barware": {
-   "recovery": 0.2622,
-   "n": 254
-  },
-  "Toys": {
-   "recovery": 0.2217,
-   "n": 25
-  },
-  "Training & Behaviour": {
-   "recovery": 0.2784,
+   "recovery": 0.3038,
    "n": 145
   },
+  "Toys": {
+   "recovery": 0.2894,
+   "n": 11
+  },
+  "Training & Behaviour": {
+   "recovery": 0.2833,
+   "n": 94
+  },
   "Transporting & Storage": {
-   "recovery": 0.2797,
-   "n": 27
+   "recovery": 0.4249,
+   "n": 13
   },
   "Travel Accessories": {
-   "recovery": 0.3283,
-   "n": 6
+   "recovery": 0.4469,
+   "n": 3
   },
   "Uncategorized": {
-   "recovery": 0.2699,
-   "n": 46
+   "recovery": 0.3346,
+   "n": 33
   },
   "Vehicles": {
-   "recovery": 0.2333,
-   "n": 369
+   "recovery": 0.2338,
+   "n": 366
   },
   "Video Components": {
-   "recovery": 0.2243,
-   "n": 162
+   "recovery": 0.2763,
+   "n": 109
   },
   "Videogame Accessories All": {
    "recovery": 0.4234,
    "n": 2
   },
   "Watering": {
-   "recovery": 0.3343,
-   "n": 39
+   "recovery": 0.2555,
+   "n": 27
   },
   "Watersports": {
    "recovery": 0.0,
-   "n": 5
+   "n": 1
   },
   "Wear & Tear Parts Car & Truck": {
-   "recovery": 0.1468,
-   "n": 730
+   "recovery": 0.2265,
+   "n": 316
   },
   "Wearables": {
-   "recovery": 0.1164,
-   "n": 132
+   "recovery": 0.1493,
+   "n": 89
   },
   "Weather Measuring": {
-   "recovery": 0.2763,
-   "n": 15
-  },
-  "Wheeled": {
-   "recovery": 0.0,
-   "n": 2
+   "recovery": 0.2942,
+   "n": 12
   },
   "White Goods": {
-   "recovery": 0.4123,
-   "n": 66
+   "recovery": 0.4133,
+   "n": 65
   },
   "Wireless Accessories": {
-   "recovery": 0.1535,
-   "n": 391
+   "recovery": 0.1879,
+   "n": 294
   },
   "Wireless Audio": {
-   "recovery": 0.1502,
-   "n": 7
+   "recovery": 0.5562,
+   "n": 2
   },
   "Wireless Bluetooth": {
-   "recovery": 0.1616,
-   "n": 83
+   "recovery": 0.2206,
+   "n": 48
   },
   "Wireless Cases": {
-   "recovery": 0.0402,
-   "n": 69
+   "recovery": 0.0693,
+   "n": 47
   },
   "Wireless Phones": {
-   "recovery": 0.1085,
-   "n": 461
+   "recovery": 0.1608,
+   "n": 361
   },
   "Wireless Prepaid": {
-   "recovery": 0.1093,
-   "n": 4
+   "recovery": 0.1565,
+   "n": 2
   },
   "Women's Accessories": {
    "recovery": 0.2174,
@@ -1221,17 +1155,13 @@
    "recovery": 0.2561,
    "n": 12
   },
-  "Work & Safety Footwear-Men": {
-   "recovery": 0.0,
-   "n": 2
-  },
   "Workwear, Site & Safety Equipment": {
-   "recovery": 0.2441,
-   "n": 233
+   "recovery": 0.2661,
+   "n": 101
   },
   "Writing Instruments and Accessories": {
-   "recovery": 0.1608,
-   "n": 264
+   "recovery": 0.1969,
+   "n": 169
   }
  }
 }

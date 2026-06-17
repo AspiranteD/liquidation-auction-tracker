@@ -27,6 +27,14 @@ DEFAULT_OUT = "data/recovery.json"
 # Por debajo de esta muestra, la recuperación del grupo no es fiable: el lector
 # cae al valor global en su lugar.
 MIN_SAMPLE = 30
+# Solo se cuentan artículos con al menos estos días en stock: si se incluyen los
+# camiones recientes (aún sin vender, revenue=0), la recuperación se hunde
+# artificialmente. Medimos la recuperación a MADUREZ (cohorte que ya ha tenido
+# tiempo de venderse). Validado: <365d ~24%, >365d ~28%, >540d ~31%.
+MATURED_DAYS = 365
+# Fecha de referencia para calcular la antigüedad (pásala por --as-of para
+# resultados reproducibles; por defecto, hoy).
+DEFAULT_AS_OF = "2026-06-17"
 
 
 def _db_url(env_path: str) -> str:
@@ -42,6 +50,10 @@ def main() -> int:
     parser.add_argument("--env", default=DEFAULT_ENV)
     parser.add_argument("--out", default=DEFAULT_OUT)
     parser.add_argument("--min-sample", type=int, default=MIN_SAMPLE)
+    parser.add_argument("--matured-days", type=int, default=MATURED_DAYS,
+                        help="Solo cuenta artículos con >= estos días en stock")
+    parser.add_argument("--as-of", default=DEFAULT_AS_OF,
+                        help="Fecha de referencia para la antigüedad (YYYY-MM-DD)")
     args = parser.parse_args()
 
     if not os.path.exists(args.env):
@@ -54,7 +66,7 @@ def main() -> int:
     base = pd.read_sql(
         """
         SELECT p.lpn, p.id_a2z, p.amazon_category cat, p.amazon_department dept,
-               p.purchase_price pp,
+               p.purchase_price pp, p.purchase_date,
                s.revenue
         FROM physical_item p
         LEFT JOIN (
@@ -69,11 +81,22 @@ def main() -> int:
     base["pp"] = pd.to_numeric(base["pp"], errors="coerce")
     base["revenue"] = pd.to_numeric(base["revenue"], errors="coerce")
     # retail B-Stock estimado por ítem: valor_bstock del camión repartido por
-    # peso del purchase_price (mismo método que el recomendador).
+    # peso del purchase_price (mismo método que el recomendador). El reparto usa
+    # TODOS los items del camión (la antigüedad solo filtra qué cuenta luego).
     vb = trucks.set_index("id")["valor_bstock"]
     sumpp = base.groupby("id_a2z")["pp"].sum()
     base["est_retail"] = base["id_a2z"].map(vb) * base["pp"] / base["id_a2z"].map(sumpp)
-    valid = base[base["est_retail"] > 0].copy()
+
+    # Filtro de madurez: descarta artículos demasiado recientes (aún sin vender)
+    # para no hundir la recuperación con stock que todavía rotará.
+    as_of = pd.Timestamp(args.as_of)
+    base["held"] = (as_of - pd.to_datetime(base["purchase_date"], errors="coerce")).dt.days
+    matured = base["held"] >= args.matured_days
+    valid = base[(base["est_retail"] > 0) & matured].copy()
+    print(
+        f"Madurez >= {args.matured_days} días: {len(valid)} de "
+        f"{(base['est_retail'] > 0).sum()} artículos con retail.",
+    )
 
     def recovery_by(key: str) -> dict:
         out = {}
@@ -94,6 +117,8 @@ def main() -> int:
     payload = {
         "generated": datetime.now().isoformat(timespec="seconds"),
         "min_sample": args.min_sample,
+        "matured_days": args.matured_days,
+        "as_of": args.as_of,
         "global": round(global_rec, 4),
         "by_department": recovery_by("dept"),
         "by_category": recovery_by("cat"),
