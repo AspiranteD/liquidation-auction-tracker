@@ -37,6 +37,16 @@ que queda abierto, por prioridad.
    2.651 históricos): decidir si marcar solo ≤4 para reducir ruido.
 8. **Dudas de producto** en `docs/DUDAS-manifiestos.md` (umbrales, monitores
    y proyectores como pérdida, lista de marcas premium...).
+9. **Artículos baratos (<10€) en manifiestos**: nuevas métricas en el análisis
+   de manifiestos. Para cada camión, detectar y reportar:
+   - Cantidad de artículos con precio lista < 10€
+   - Valor total que representan esos artículos
+   - % del total del camión que son "basura de bajo valor"
+   
+   Justificación: estos artículos tienen muy alto riesgo de no venderse nunca
+   en el almacén/canal de Reusalia (poco margen, pto de venta débil) y son
+   casi pérdida pura → decisión de puja se debe penalizar si el lote lleva
+   mucho volumen de estos.
 
 ## Operativa (referencia rápida)
 
