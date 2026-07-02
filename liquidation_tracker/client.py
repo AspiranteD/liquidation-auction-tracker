@@ -35,6 +35,7 @@ class BStockClient:
         user_agent: str = DEFAULT_USER_AGENT,
         timeout: int = 20,
         request_delay: float = 1.0,
+        cookie: Optional[str] = None,
     ) -> None:
         self.timeout = timeout
         self.request_delay = request_delay
@@ -48,6 +49,11 @@ class BStockClient:
                 ),
             }
         )
+        # Optional logged-in session for MIXED_* manifests that require auth.
+        # ``cookie`` is the raw Cookie header captured from a logged-in browser
+        # (see config.BStockAuth / BSTOCK_COOKIE).
+        if cookie:
+            self.session.headers["Cookie"] = cookie
 
     def _get(self, url: str, **kwargs) -> requests.Response:
         response = self.session.get(url, timeout=self.timeout, **kwargs)
@@ -92,8 +98,8 @@ class BStockClient:
         if "csv" not in content_type:
             raise RuntimeError(
                 f"Manifest endpoint did not return CSV for {lot_id} "
-                f"(content-type: {content_type}). The lot may require an "
-                "authenticated session."
+                f"(content-type: {content_type}). The lot likely requires a "
+                "logged-in session — set BSTOCK_COOKIE (see config.BStockAuth)."
             )
         with open(dest_path, "wb") as fh:
             for chunk in response.iter_content(chunk_size=8192):

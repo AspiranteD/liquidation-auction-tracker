@@ -56,11 +56,15 @@ def main() -> int:
                         help="Fecha de referencia para la antigüedad (YYYY-MM-DD)")
     args = parser.parse_args()
 
-    if not os.path.exists(args.env):
-        print(f"ENV no existe: {args.env}", file=sys.stderr)
-        return 2
-
-    url = _db_url(args.env)
+    # Preferimos DATABASE_URL del entorno (p.ej. `doppler run -- ...`); si no,
+    # caemos al fichero .env indicado por --env.
+    url = os.environ.get("DATABASE_URL", "").strip()
+    if not url:
+        if not os.path.exists(args.env):
+            print(f"Sin DATABASE_URL en el entorno y ENV no existe: {args.env}",
+                  file=sys.stderr)
+            return 2
+        url = _db_url(args.env)
     conn = psycopg2.connect(url)
     conn.set_session(readonly=True, autocommit=True)
     base = pd.read_sql(

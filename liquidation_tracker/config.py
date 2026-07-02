@@ -195,6 +195,28 @@ class AlertRules:
 
 
 @dataclass
+class BStockAuth:
+    """Optional authenticated session for manifests that require login.
+
+    B-Stock EU logs in via SSO, so the practical hook is a session cookie
+    captured from a logged-in browser and pasted into ``BSTOCK_COOKIE`` (the
+    raw ``Cookie:`` header value). Without it, MIXED_* lots that need a session
+    can't be downloaded and are simply skipped.
+    """
+
+    cookie: Optional[str] = None
+
+    @classmethod
+    def from_env(cls) -> "BStockAuth":
+        cookie = os.getenv("BSTOCK_COOKIE")
+        return cls(cookie=cookie.strip() if cookie else None)
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.cookie)
+
+
+@dataclass
 class Settings:
     db_path: str = "data/auctions.db"
     manifest_dir: str = "data/manifests"
@@ -203,6 +225,7 @@ class Settings:
     whatsapp: WhatsAppConfig = field(default_factory=WhatsAppConfig)
     call: CallConfig = field(default_factory=CallConfig)
     rules: AlertRules = field(default_factory=AlertRules)
+    auth: BStockAuth = field(default_factory=BStockAuth)
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -215,4 +238,5 @@ class Settings:
             whatsapp=WhatsAppConfig.from_env(),
             call=CallConfig.from_env(),
             rules=rules,
+            auth=BStockAuth.from_env(),
         )

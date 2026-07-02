@@ -17,20 +17,26 @@ Examples
 from __future__ import annotations
 
 import argparse
+import csv
+import glob
 import logging
 import os
+import re
 import sys
 from datetime import datetime
 
 import requests
 
-from . import analyzer, insights, reports
+from . import analyzer, insights
 from .calculator import BidCalculator
 from .client import BStockClient, CloudflareChallenge
 from .config import Settings
+from .models import Auction
 from .notifier import EmailNotifier, WhatsAppNotifier
 from .pipeline import MonitorPipeline
 from .pricing import PriceResolver, prime_cache
+from .ranking import rank_lot, render_table, to_csv_rows
+from .recovery import load_recovery
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -160,6 +166,7 @@ def _print_insights_summary(result: insights.ManifestInsights) -> None:
 
 
 def cmd_inspect(args: argparse.Namespace) -> int:
+    from . import reports  # lazy: needs fpdf, not required by `rank`/`bid`/`list`
     if not os.path.exists(args.csv):
         print(f"File not found: {args.csv}", file=sys.stderr)
         return 2
@@ -185,7 +192,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
 def cmd_manifests(args: argparse.Namespace) -> int:
     """Download + deep-analyze the manifests of every active auction."""
     settings = Settings.from_env()
-    client = BStockClient()
+    client = BStockClient(cookie=settings.auth.cookie)
     try:
         auctions = client.list_auctions(country=args.country)
     except CloudflareChallenge as exc:
@@ -268,6 +275,7 @@ def cmd_prime_prices(args: argparse.Namespace) -> int:
 
 def cmd_watch(args: argparse.Namespace) -> int:
     """Detect new auctions, build their PDF report and ping WhatsApp."""
+    from . import reports  # lazy: pulls in fpdf via the report stack
     settings = Settings.from_env()
     client = BStockClient()
     try:
@@ -294,6 +302,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
 
 def cmd_digest(args: argparse.Namespace) -> int:
     """Bundle every active lot into one PDF and email it."""
+    from . import reports  # lazy: needs fpdf
     settings = Settings.from_env()
     client = BStockClient()
     try:
@@ -353,6 +362,97 @@ def cmd_digest(args: argparse.Namespace) -> int:
         attachments=[pdf_path],
     )
     print(f"Email enviado: {sent}")
+    return 0
+
+
+def _rank_from_dir(directory: str, country: str, lot_type: str, model, calc,
+                   multiple: float):
+    """Rank manifests already on disk (offline). retail comes from the manifest
+    itself; lot_type/country are assumed (flags). Handy to test the scoring and
+    to rank our own trucks (data/nuestros)."""
+    rankings = []
+    for path in sorted(glob.glob(os.path.join(directory, "*.csv"))):
+        items = analyzer.parse_manifest(path)
+        if not items:
+            continue
+        stem = os.path.splitext(os.path.basename(path))[0]
+        result = insights.deep_analyze(items, label=stem)
+        # trailing digit run: "A2Z50266" -> 50266 (not 250266)
+        m = re.search(r"(\d+)\D*$", stem)
+        auction = Auction(
+            auction_id=int(m.group(1)) if m else len(rankings) + 1,
+            title=stem, url="", country=country, lot_type=lot_type,
+            retail_value=result.total_retail, current_bid=0.0,
+        )
+        rankings.append(rank_lot(auction, result, model, calc, multiple=multiple))
+    return rankings
+
+
+def _rank_live(country: str, settings, model, calc, multiple: float):
+    """Scrape active auctions, download each manifest, deep-analyze and rank."""
+    client = BStockClient(cookie=settings.auth.cookie)
+    auctions = client.list_auctions(country=country)
+    os.makedirs(settings.manifest_dir, exist_ok=True)
+    rankings = []
+    for auction in auctions:
+        try:
+            lot_id = client.fetch_lot_id(auction)
+            if not lot_id:
+                raise RuntimeError("lot_id no encontrado en la pagina de detalle")
+            csv_path = os.path.join(
+                settings.manifest_dir, f"{auction.auction_id}_{lot_id}.csv"
+            )
+            if not os.path.exists(csv_path):
+                client.download_manifest(lot_id, csv_path)
+            items = analyzer.parse_manifest(csv_path)
+            result = insights.deep_analyze(items, label=str(auction.auction_id))
+            rankings.append(rank_lot(auction, result, model, calc, multiple=multiple))
+        except Exception as exc:  # noqa: BLE001 - keep going per auction
+            print(f"#{auction.auction_id} sin manifiesto: {exc}", file=sys.stderr)
+    return rankings
+
+
+def cmd_rank(args: argparse.Namespace) -> int:
+    """Rank lots by manifest-weighted recovery + hidden value (regalados/cajas)."""
+    settings = Settings.from_env()
+    model = load_recovery()
+    calc = BidCalculator()
+    multiple = settings.rules.bid_multiple
+    try:
+        if args.from_dir:
+            rankings = _rank_from_dir(
+                args.from_dir, args.country, args.type, model, calc, multiple
+            )
+        else:
+            rankings = _rank_live(args.country, settings, model, calc, multiple)
+    except (CloudflareChallenge, requests.RequestException) as exc:
+        print(f"No se pudo escanear B-Stock: {exc}", file=sys.stderr)
+        return 2
+
+    if not rankings:
+        print("Sin lotes rankeables.")
+        return 0
+
+    print(render_table(rankings, limit=args.limit))
+
+    os.makedirs(args.report_dir, exist_ok=True)
+    rows = to_csv_rows(rankings)
+    csv_path = os.path.join(args.report_dir, f"ranking_{args.country}.csv")
+    with open(csv_path, "w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+    md_path = os.path.join(args.report_dir, f"ranking_{args.country}.md")
+    with open(md_path, "w", encoding="utf-8") as fh:
+        fh.write(
+            f"# Ranking {args.country} — recuperación (manifest) + valor oculto\n\n"
+            f"Recuperación ponderada por manifest + regalados + cajas sin declarar. "
+            f"`score = ingreso_esperado + valor_oculto`. Puja máx = coste ≤ ingreso/"
+            f"{multiple:g}.\n\n```\n{render_table(rankings)}\n```\n"
+        )
+    print(f"\n{len(rankings)} lotes rankeados.")
+    print(f"CSV: {csv_path}")
+    print(f"MD:  {md_path}")
     return 0
 
 
@@ -428,6 +528,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_prime.add_argument("--source", default="manual",
                          help="Label stored with each price (default: manual)")
     p_prime.set_defaults(func=cmd_prime_prices)
+
+    p_rank = sub.add_parser(
+        "rank",
+        help="Rank lots by manifest-weighted recovery + hidden value (regalados/cajas)",
+    )
+    p_rank.add_argument("--country", default="ES")
+    p_rank.add_argument("--type", default="4 Pallets",
+                        help='lot_type assumed in --from-dir mode (default "4 Pallets")')
+    p_rank.add_argument("--from-dir", dest="from_dir",
+                        help="Rank manifests already on disk (offline) instead of scraping")
+    p_rank.add_argument("--limit", type=int, default=0,
+                        help="Show only the top N in stdout (0 = all)")
+    p_rank.add_argument("--report-dir", default="data/reports")
+    p_rank.set_defaults(func=cmd_rank)
 
     return parser
 
