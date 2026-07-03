@@ -198,10 +198,15 @@ class AlertRules:
 class BStockAuth:
     """Optional authenticated session for manifests that require login.
 
-    B-Stock EU logs in via SSO, so the practical hook is a session cookie
-    captured from a logged-in browser and pasted into ``BSTOCK_COOKIE`` (the
-    raw ``Cookie:`` header value). Without it, MIXED_* lots that need a session
-    can't be downloaded and are simply skipped.
+    Two ways to authenticate (resolved in :func:`liquidation_tracker.auth.get_session_cookie`):
+
+    1. ``BSTOCK_COOKIE`` — a raw ``Cookie:`` header pasted from a logged-in
+       browser. Manual but zero-dependency; wins when set.
+    2. ``BSTOCK_USER`` + ``BSTOCK_PASS`` — credentials (from Doppler/.env) that
+       drive an automatic Playwright login (FusionAuth SSO), capturing and
+       caching the session cookie. The password is never stored in this object.
+
+    Without either, MIXED_* lots that need a session are simply skipped.
     """
 
     cookie: Optional[str] = None

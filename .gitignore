@@ -19,6 +19,8 @@ data/reports/
 data/watch_state.json
 # Cache de precios verificados (crece por ASIN; recovery.json y baselines.json sí se versionan)
 data/price_cache.json
+# Cookie de sesión B-Stock cacheada por el login automático (SECRETO — nunca versionar)
+data/bstock_cookie.json
 # Manifiestos de camiones propios exportados de la BBDD (datos de negocio)
 data/nuestros/
 data/estudio_nuestros.json
