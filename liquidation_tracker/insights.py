@@ -230,6 +230,28 @@ def _has_accessory_word(text: str) -> bool:
     return any(word in lowered for word in ACCESSORY_WORDS)
 
 
+# Manifest CATEGORY/SUBCATEGORY tokens that prove the line is an accessory,
+# game-software or merch — NOT the premium device — no matter what the free-text
+# title says. Same philosophy as TV detection: trust the taxonomy. Crucially
+# "games" (plural) tags game software ("Playstation 5 Games") while a real
+# console sits under "...Consoles" (no "games"), so consoles still pass.
+_ACCESSORY_CATEGORY_TOKENS = (
+    "accessor", "controller", "gamepad",
+    "case", "cover", "funda", "carcasa", "hülle", "huelle", "custodia", "coque",
+    "merchand",
+    "games", "juegos", "giochi", "spiele", "jeux",   # software, not hardware
+)
+
+
+def _is_accessory_by_taxonomy(item: "ManifestItem") -> bool:
+    """True when the manifest's own category/subcategory marks the line as an
+    accessory, game or merch (e.g. "Videogame Accessories All", "Controllers",
+    "Playstation 5 Games") — so a premium keyword in the title is the platform
+    it works with/for, not the device being sold."""
+    blob = f"{item.category or ''} {item.subcategory or ''}".lower()
+    return any(tok in blob for tok in _ACCESSORY_CATEGORY_TOKENS)
+
+
 def _first_word_pos(text: str, words: List[str]) -> Optional[int]:
     """Position of the earliest occurrence of any word, or None."""
     lowered = text.lower()
@@ -461,6 +483,8 @@ def _giveaway_suspects(
         lowered = desc.lower()
         if any(word in lowered for word in SURVEILLANCE_WORDS):
             continue  # CCTV/webcams: cheap by nature, lens specs mislead
+        if _is_accessory_by_taxonomy(item):
+            continue  # manifest category says accessory/game/merch, not device
         for pattern, typical in PREMIUM_PRODUCTS.items():
             match = re.search(pattern, desc, re.IGNORECASE)
             if not match:
@@ -641,6 +665,16 @@ def analyze_containers(
     boxes: List[ContainerStats] = []
     pallets: List[PalletStats] = []
 
+    # The "one declared box => the other five are gifted" inference assumes the
+    # ESBX model of ~6 Amazon boxes per physical pallet. Some manifests (notably
+    # MIXED lots) instead map ONE box_id per pallet_id, where a single box is
+    # normal, not evidence of gifting. Only trust that inference when the lot
+    # shows at least one genuine multi-box pallet; otherwise it fabricates huge
+    # phantom value (e.g. 5 x box x every pallet).
+    lot_has_multibox = any(
+        len({i.box_id for i in pit if i.box_id}) >= 2 for pit in by_pallet.values()
+    )
+
     for pallet_id, p_items in by_pallet.items():
         box_ids = sorted({i.box_id for i in p_items if i.box_id})
         weighted = [(i.weight_kg * i.qty, i.qty) for i in p_items if i.weight_kg]
@@ -652,7 +686,8 @@ def analyze_containers(
         if len(box_ids) >= 2:
             pallet_type = "cajas"
         elif (
-            len(box_ids) == 1
+            lot_has_multibox
+            and len(box_ids) == 1
             and units >= rules.single_box_min_units
             and avg_weight is not None
             and avg_weight <= rules.single_box_max_avg_kg

@@ -135,6 +135,24 @@ def test_real_console_at_absurd_price_still_flagged():
     assert found[0].tier == "seguro"
 
 
+def test_console_game_not_flagged_by_taxonomy():
+    # "God of War ... PS5" matches the PS5 pattern, but the manifest category
+    # says it is a GAME, not the console. Trust the taxonomy.
+    items = [_item(description="God of War: Ragnarok PS5", unit_retail=20.0,
+                   category="Games", subcategory="Playstation 5 Games",
+                   department="Video Games")]
+    assert insights.find_giveaways(items) == []
+
+
+def test_videogame_accessory_not_flagged_by_taxonomy():
+    # A PS5-branded adapter/controller in the "Videogame Accessories" category
+    # is not a console even though its title leads with "PS5".
+    items = [_item(description="PS5 - Playstation Link USB-Adapter", unit_retail=20.0,
+                   category="Videogame Accessories All", subcategory="Controllers",
+                   department="Video Games")]
+    assert insights.find_giveaways(items) == []
+
+
 def test_devices_with_spec_words_after_name_still_flagged():
     # Spec vocabulary (memoria, SSD, tarjeta, mandos) AFTER the device name
     # must not disable detection: these are real devices, not peripherals.
@@ -415,17 +433,36 @@ def test_loose_medium_pallet_is_granel():
 
 def test_single_box_pallet_of_light_items_counts_missing_boxes():
     # 40 small light items under ONE PkgID = exactly one Amazon box: the
-    # other five boxes of the pallet are likely gifted.
+    # other five boxes of the pallet are likely gifted. Trusted only because the
+    # lot ALSO has a genuine multi-box pallet (the ESBX 6-box model).
     items = [
         _item(pallet_id="P1", box_id="PKGX", description=f"articulo {n}",
               weight_kg=0.5)
         for n in range(40)
     ]
-    boxes, pallets = insights.analyze_containers(items)
-    assert pallets[0].pallet_type == "cajas"
-    assert pallets[0].box_count == 1
-    assert pallets[0].missing_boxes == 5
-    assert pallets[0].suspicious is True
+    items += _box_pallet("P2", {f"B{n}": 20 for n in range(6)})  # normal 6-box pallet
+    _, pallets = insights.analyze_containers(items)
+    p1 = next(p for p in pallets if p.pallet_id == "P1")
+    assert p1.pallet_type == "cajas"
+    assert p1.box_count == 1
+    assert p1.missing_boxes == 5
+    assert p1.suspicious is True
+
+
+def test_one_box_per_pallet_lot_not_flagged_as_gifted():
+    # MIXED-lot structure: every pallet_id maps to exactly ONE box_id. A single
+    # box is NORMAL here, not evidence of 5 gifted boxes — the inference must NOT
+    # fire (it used to fabricate ~5 x box x every pallet of phantom value).
+    items = []
+    for p in range(4):
+        items += [
+            _item(pallet_id=f"P{p}", box_id=f"BX{p}",
+                  description=f"art {p}-{n}", weight_kg=0.5)
+            for n in range(40)
+        ]
+    _, pallets = insights.analyze_containers(items)
+    assert all(not pal.suspicious for pal in pallets)
+    assert all(pal.missing_boxes == 0 for pal in pallets)
 
 
 def test_cheap_but_full_box_not_flagged():
