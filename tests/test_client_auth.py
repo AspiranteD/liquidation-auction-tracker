@@ -1,6 +1,18 @@
 """BSTOCK_COOKIE auth hook: config parsing + client header wiring."""
-from liquidation_tracker.client import BStockClient
+from liquidation_tracker.client import BStockClient, sku_candidates
 from liquidation_tracker.config import BStockAuth, Settings
+
+
+def test_sku_candidates_esbx_is_uppercase():
+    # ESBX (and most types) use the all-uppercase sku — the first candidate hits.
+    assert sku_candidates("a2z_cr_es_20260629_esbx1_012")[0] == "A2Z_CR_ES_20260629_ESBX1_012"
+
+
+def test_sku_candidates_mixed_falls_back_to_titlecase():
+    # MIXED lots are stored title-cased ("Mixed"); uppercasing 302s to /oops, so
+    # the title-cased lot-type token must be offered as a fallback candidate.
+    cands = sku_candidates("a2z_cr_it_20260629_mixed_005")
+    assert cands == ["A2Z_CR_IT_20260629_MIXED_005", "A2Z_CR_IT_20260629_Mixed_005"]
 
 
 def test_bstock_auth_reads_cookie_from_env(monkeypatch):

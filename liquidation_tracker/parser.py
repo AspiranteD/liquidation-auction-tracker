@@ -126,5 +126,9 @@ def parse_lot_id(detail_html: str) -> Optional[str]:
         if script.string and "lot_ids" in script.string:
             match = _LOT_ID_RE.search(script.string)
             if match:
+                # The page ships lot_ids lowercase; we normalize to uppercase
+                # here (stable filenames/keys). The manifest endpoint is
+                # CASE-SENSITIVE per lot-type, so the actual case variants are
+                # resolved at download time (see client._sku_candidates).
                 return match.group(1).upper()
     return None
