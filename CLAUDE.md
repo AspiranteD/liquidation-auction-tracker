@@ -50,6 +50,24 @@ Estas tareas apuntan a rutas **fijas** dentro de esta carpeta:
 
 - `.env` está en `.gitignore` (**no** está en GitHub ni en Doppler). Restaurar desde backup.
 - La carpeta `data/` (DB + manifiestos) tampoco está en git: es estado vivo, respaldar aparte.
+- **Login B-Stock (OPCIONAL, latente):** `cli login` autentica vía Playwright (FusionAuth SSO)
+  con `BSTOCK_USER`/`BSTOCK_PASS`, guardados en **Doppler `liquidation-tracker/prd`**. Cachea la
+  cookie en `data/bstock_cookie.json` (gitignorado). **No hace falta para nada del flujo normal**
+  (ver gotcha de MIXED). Para meter las credenciales sin exponerlas: `python scripts/set_bstock_creds.py`.
+
+## Gotchas (leer antes de tocar descargas de manifiestos)
+
+- **Los manifiestos MIXED son PÚBLICOS** — NO requieren login. Lo que fallaba era la
+  **capitalización del sku**: el endpoint `manifest-prod.bstock.com/downloads/get` es
+  *case-sensitive* por tipo de lote (`ESBX…`→MAYÚSCULAS, `Mixed`→Title-case). `parse_lot_id`
+  normaliza a mayúsculas y `client.sku_candidates` prueba las variantes (upper → tipo en
+  Title-case) hasta obtener CSV. Si un tipo nuevo falla, añade su variante ahí.
+- **`fpdf2` es obligatorio** para `inspect`/`digest`/`watch` (generan PDF). Está en
+  `requirements.txt`; si ves `ModuleNotFoundError: fpdf`, `pip install -r requirements.txt`.
+- **Detector de regalados** (`insights.py`): se fía de la **taxonomía del manifiesto**
+  (category/subcategory) para descartar juegos/accesorios (p.ej. "PS5 Games", "Controllers"),
+  igual que la detección de TVs. El heurístico "1 caja → 5 regaladas" solo aplica si el lote
+  tiene algún pallet multi-caja real (los MIXED mapean 1 caja por pallet y lo inflaban).
 
 ## Convenciones
 

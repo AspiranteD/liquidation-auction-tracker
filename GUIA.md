@@ -165,9 +165,15 @@ python -m liquidation_tracker.cli bid --retail 50000 --type "4 Pallets"  # calcu
 python -m liquidation_tracker.cli monitor                # un ciclo de alertas
 python -m liquidation_tracker.cli inspect <csv>          # análisis profundo de un manifiesto (md + PDF)
 python -m liquidation_tracker.cli manifests --country ES # baja y analiza todos los activos
+python -m liquidation_tracker.cli rank --country ES      # ranking por recuperación + valor oculto
 python -m liquidation_tracker.cli watch                  # detectar lotes nuevos + WhatsApp
 python -m liquidation_tracker.cli digest                 # PDF combinado + email
+python -m liquidation_tracker.cli login                  # (opcional) login B-Stock, no hace falta
 ```
+
+> **Nota (2026-07):** los lotes **MIXED también se descargan** (son públicos; antes fallaban por
+> un bug de capitalización del sku, ya arreglado). El comando `login` es **opcional** y no se usa
+> en el flujo normal — ver gotchas en `CLAUDE.md`.
 
 ## 9. Estructura del código
 
