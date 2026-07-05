@@ -172,6 +172,8 @@ ACCESSORY_WORDS = [
     "adaptador", "adapter", "adattatore", "dock", "hub",
     "power bank", "powerbank", "batería externa", "bateria externa",
     "selfie", "trípode", "tripode", "tripod",
+    "windscreen", "windshield", "antivento", "parabrezza", "manicotto",
+    "windschutz", "bonnette", "deadcat", "espuma antiviento",
     "soporte", "stand", "mount", "bracket", "halterung", "wandhalterung",
     "support mural", "staffa", "supporto",
     "ratón", "raton ", "mouse", "teclado", "keyboard", "alfombrilla",

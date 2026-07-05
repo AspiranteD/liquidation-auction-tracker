@@ -153,6 +153,14 @@ def test_videogame_accessory_not_flagged_by_taxonomy():
     assert insights.find_giveaways(items) == []
 
 
+def test_dji_mic_windscreen_accessory_not_flagged():
+    # A windscreen/muff FOR a DJI Mic is an accessory, not the mic itself.
+    # dji-mic is a brand-only pattern, so an accessory word anywhere excludes it.
+    items = [_item(description="YOUSHARES DJI Mic Mini Manicotto Antivento Parabrezza",
+                   unit_retail=12.0, department="Musical Instruments")]
+    assert insights.find_giveaways(items) == []
+
+
 def test_devices_with_spec_words_after_name_still_flagged():
     # Spec vocabulary (memoria, SSD, tarjeta, mandos) AFTER the device name
     # must not disable detection: these are real devices, not peripherals.
