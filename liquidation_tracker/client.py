@@ -29,6 +29,35 @@ class CloudflareChallenge(RuntimeError):
     """Raised when B-Stock returns a Cloudflare interstitial instead of content."""
 
 
+def sku_candidates(lot_id: str) -> List[str]:
+    """Case variants of a lot's manifest sku, in the order to try.
+
+    The manifest endpoint (``manifest-prod.bstock.com``) is CASE-SENSITIVE and
+    each lot-type has its own canonical casing — there is no universal rule:
+
+    * ``ESBX`` and most types are ALL-UPPERCASE  → ``A2Z_CR_ES_..._ESBX1_012``
+    * ``MIXED`` lots are TITLE-CASED             → ``A2Z_CR_IT_..._Mixed_005``
+
+    The page only builds the real sku in JavaScript, so instead of rendering we
+    try uppercase first (covers ESBX & friends in one request) and fall back to
+    title-casing the lot-type token (covers "Mixed"). Getting this wrong is what
+    made MIXED manifests 302 to ``/oops`` and look like an auth wall — they are
+    actually public.
+    """
+    upper = lot_id.upper()
+    variants = [upper]
+    parts = upper.split("_")
+    if len(parts) >= 2:
+        parts[-2] = parts[-2].capitalize()  # MIXED -> Mixed (ESBX1 -> Esbx1, unused)
+        variants.append("_".join(parts))
+    out, seen = [], set()
+    for v in variants:
+        if v not in seen:
+            seen.add(v)
+            out.append(v)
+    return out
+
+
 class BStockClient:
     def __init__(
         self,
@@ -87,23 +116,34 @@ class BStockClient:
         return lot_id
 
     def download_manifest(self, lot_id: str, dest_path: str) -> str:
-        """Download the manifest CSV for a lot_id to ``dest_path``."""
-        params = {"site": "a2z", "sku": lot_id, "file_type": "csv"}
-        logger.info("Downloading manifest for %s", lot_id)
-        response = self.session.get(
-            MANIFEST_URL, params=params, timeout=self.timeout, stream=True
-        )
-        response.raise_for_status()
-        content_type = response.headers.get("content-type", "")
-        if "csv" not in content_type:
-            raise RuntimeError(
-                f"Manifest endpoint did not return CSV for {lot_id} "
-                f"(content-type: {content_type}). The lot likely requires a "
-                "logged-in session — set BSTOCK_COOKIE (see config.BStockAuth)."
+        """Download the manifest CSV for a lot to ``dest_path``.
+
+        The manifest is PUBLIC (no login needed). The only catch is that the
+        endpoint is case-sensitive and each lot-type has its own canonical
+        casing, so we try the variants from :func:`sku_candidates`.
+        """
+        last_ct = ""
+        for sku in sku_candidates(lot_id):
+            logger.info("Downloading manifest for %s", sku)
+            response = self.session.get(
+                MANIFEST_URL,
+                params={"site": "a2z", "sku": sku, "file_type": "csv"},
+                timeout=self.timeout,
+                stream=True,
             )
-        with open(dest_path, "wb") as fh:
-            for chunk in response.iter_content(chunk_size=8192):
-                fh.write(chunk)
-        logger.info("Saved manifest to %s", dest_path)
-        time.sleep(self.request_delay)
-        return dest_path
+            response.raise_for_status()
+            last_ct = response.headers.get("content-type", "")
+            if "csv" in last_ct:
+                with open(dest_path, "wb") as fh:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        fh.write(chunk)
+                logger.info("Saved manifest to %s", dest_path)
+                time.sleep(self.request_delay)
+                return dest_path
+            response.close()  # wrong-case sku → /oops HTML; try the next variant
+            time.sleep(self.request_delay)
+        raise RuntimeError(
+            f"Manifest endpoint no devolvió CSV para {lot_id} "
+            f"(probé {sku_candidates(lot_id)}; último content-type: {last_ct}). "
+            "El lote puede haber cerrado o cambiado de formato."
+        )

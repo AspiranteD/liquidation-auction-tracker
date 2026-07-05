@@ -9,10 +9,15 @@ que queda abierto, por prioridad.
    `@CallMeBot_txtbot` (enlace enviado por WhatsApp el 12/06). El sistema ya
    está configurado con el +34601033998 y reintenta solo; en cuanto autorices,
    funciona. Sin esto, a ≤5 min solo llega el WhatsApp de última llamada.
-2. **Credenciales de B-Stock** (usuario/contraseña): para descargar los
-   manifiestos `MIXED_*` que requieren sesión (≈1/3 de los lotes). Si
-   Cloudflare bloquea el login con requests, el plan B es cliente Playwright
-   (la arquitectura ya lo permite: 3 métodos en `client.py`).
+2. ~~**Credenciales de B-Stock** para los manifiestos `MIXED_*`.~~ **RESUELTO
+   (2026-07-03): los MIXED son PÚBLICOS, no requieren sesión.** El bloqueo real
+   era un bug de capitalización del sku: `parse_lot_id` hacía `.upper()`, pero el
+   endpoint de manifiestos es *case-sensitive* por tipo de lote (`ESBX`→MAYÚSCULAS,
+   `Mixed`→Title-case), así que `MIXED_005` redirigía a `/oops` (parecía muro de
+   auth). Arreglado con `client.sku_candidates` (prueba variantes de capitalización).
+   Se construyó además un **login Playwright opcional** (`cli login`, credenciales en
+   Doppler `liquidation-tracker/prd`, FusionAuth SSO sin 2FA), pero quedó **latente e
+   innecesario** — fuera del flujo normal, por si algún endpoint futuro sí exige sesión.
 3. **Manifiesto del camión A2Z49096** (tu última compra, 2.600 artículos):
    no está cargado en la tabla `manifest` de la BBDD ni en la carpeta MEGA.
    Si aparece el CSV, analizarlo (`python -m liquidation_tracker.cli inspect`).

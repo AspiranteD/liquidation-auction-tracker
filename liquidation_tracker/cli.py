@@ -27,7 +27,7 @@ from datetime import datetime
 
 import requests
 
-from . import analyzer, insights
+from . import analyzer, auth, insights
 from .calculator import BidCalculator
 from .client import BStockClient, CloudflareChallenge
 from .config import Settings
@@ -186,6 +186,36 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     )
     print(f"\nInforme completo: {path}")
     print(f"PDF: {pdf_path}")
+    return 0
+
+
+def cmd_login(args: argparse.Namespace) -> int:
+    """Test the automatic B-Stock login and cache the session cookie.
+
+    Never prints the cookie value. Reads BSTOCK_USER/BSTOCK_PASS from the
+    environment (Doppler/.env)."""
+    if not (os.getenv("BSTOCK_USER") and os.getenv("BSTOCK_PASS")):
+        print("Faltan BSTOCK_USER / BSTOCK_PASS en el entorno "
+              "(Doppler o .env).", file=sys.stderr)
+        return 2
+    try:
+        header = auth.login_fetch_cookies(
+            os.environ["BSTOCK_USER"], os.environ["BSTOCK_PASS"],
+            headless=not args.headed,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"LOGIN FALLÓ: {exc}", file=sys.stderr)
+        return 1
+    # Cache it the same way get_session_cookie would, so `rank`/`manifests` reuse it.
+    import json as _json
+    import time as _time
+    cache = os.getenv("BSTOCK_COOKIE_CACHE", auth.DEFAULT_CACHE)
+    os.makedirs(os.path.dirname(cache) or ".", exist_ok=True)
+    with open(cache, "w", encoding="utf-8") as fh:
+        _json.dump({"ts": _time.time(), "cookie": header}, fh)
+    print(f"LOGIN OK — {header.count('=')} cookies de sesión capturadas.")
+    print(f"Cacheada en {cache} (TTL {auth.COOKIE_TTL_SECONDS // 3600} h). "
+          "Ya puedes correr `rank`/`manifests` y bajará los MIXED.")
     return 0
 
 
@@ -506,6 +536,13 @@ def build_parser() -> argparse.ArgumentParser:
                              help="Try a live Amazon price check on doubtful giveaways")
     p_manifests.add_argument("--report-dir", default="data/reports")
     p_manifests.set_defaults(func=cmd_manifests)
+
+    p_login = sub.add_parser(
+        "login", help="Test the automatic B-Stock login and cache the session cookie"
+    )
+    p_login.add_argument("--headed", action="store_true",
+                         help="Show the browser window (debug captcha/2FA)")
+    p_login.set_defaults(func=cmd_login)
 
     p_watch = sub.add_parser(
         "watch", help="Detect new auctions, build PDF reports, ping WhatsApp"
