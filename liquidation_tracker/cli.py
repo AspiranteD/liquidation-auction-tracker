@@ -486,6 +486,176 @@ def cmd_rank(args: argparse.Namespace) -> int:
     return 0
 
 
+_VERDICT_TAG = {"🟢": "🟢 VERDE", "🟡": "🟡 ÁMBAR", "🔴": "🔴 ROJO", "⬜": "⬜ —"}
+
+
+def _print_lot_report(report, from_cache: bool) -> None:
+    """Complete human-readable analysis of one lot (mirrors the PDF, in text)."""
+    from . import reports
+    a, r = report.auction, report.insights
+    level, label, notes = reports.lot_verdict(report)
+    print("\n" + "=" * 74)
+    print(f"{_VERDICT_TAG.get(level, level)}  —  {label}")
+    print(f"#{a.auction_id}  {a.lot_type or '?'} ({a.country or '?'})  ·  {a.url}")
+    if a.title:
+        print(f"  {a.title[:150]}")
+    print(f"  Manifiesto: {'CACHÉ (ya estaba analizado)' if from_cache else 'descargado ahora'}"
+          f"  ·  {r.total_lines} líneas / {r.total_units} uds")
+    print("  " + reports.price_status(report))
+    bid_line = reports._bid_line(report)
+    if bid_line:
+        print("  " + bid_line)
+
+    print("\n-- Lectura rápida --")
+    for bullet in insights.quick_read(r):
+        print(f"  • {bullet}")
+
+    conf = sum(1 for g in r.giveaways if g.tier == "seguro")
+    unver = sum(1 for g in r.giveaways if g.tier == "sin_verificar")
+    missing = sum(p.missing_boxes for p in r.suspicious_pallets)
+    print("\n-- Números --")
+    print(f"  Retail declarado : {r.total_retail:>10,.0f} EUR")
+    print(f"  TVs (pérdida)    : {r.tv_units} uds, {r.tv_loss_retail:,.0f} EUR "
+          f"-> retail efectivo {r.effective_retail:,.0f} EUR")
+    print(f"  Cajas regaladas  : {r.gifted_box_value_point:>10,.0f} EUR "
+          f"[{r.gifted_box_value_low:,.0f}-{r.gifted_box_value_high:,.0f}]  "
+          f"({missing} cajas en {len(r.suspicious_pallets)} pallets)")
+    print(f"  Regalados        : {conf} confirmados ({r.giveaway_value_sure:,.0f} EUR), "
+          f"{unver} sin verificar ({r.giveaway_value_unverified:,.0f} EUR)")
+    print(f"  VALOR REAL est.  : {r.real_retail_point:>10,.0f} EUR  "
+          f"(oculto +{r.hidden_value_point:,.0f})")
+
+    if r.giveaways:
+        print("\n-- Regalados nombrados (oculto = real estimado - declarado) --")
+        for g in sorted(r.giveaways, key=lambda g: g.hidden_value, reverse=True)[:12]:
+            print(f"  [{g.tier:12}] decl {g.item.unit_retail:>7,.0f} -> ~{g.reference_price:,.0f}/u  "
+                  f"oculto ~{g.hidden_value:,.0f}  | {(g.item.description or '')[:52]}")
+            if g.amazon_url:
+                print(f"       {g.amazon_url}")
+
+    if r.suspicious_pallets:
+        print("\n-- Cajas sin declarar (pallets de cajas incompletos) --")
+        for p in r.suspicious_pallets[:10]:
+            print(f"  {p.pallet_id[:22]:22}  {p.box_count}/6 cajas, faltan {p.missing_boxes}  "
+                  f"~{p.missing_value_point:,.0f} EUR")
+
+    if r.suspicious_boxes:
+        print(f"\n-- Cajas demasiado vacías: {len(r.suspicious_boxes)} "
+              "(ver informe md para el detalle) --")
+
+    print("\n-- Top departamentos por retail --")
+    for g in r.by_department[:6]:
+        print(f"  {g.name[:36]:36} {g.retail:>10,.0f} EUR  ({g.pct_retail}%)")
+
+    if notes:
+        print("\n-- Notas del veredicto --")
+        for note in notes:
+            print(f"  · {note}")
+
+
+def cmd_lot(args: argparse.Namespace) -> int:
+    """Complete analysis of a single lot from its B-Stock URL.
+
+    Reuses the cached manifest if it was already downloaded ('ya analizado'),
+    otherwise downloads it. Prints the full report (verdict, bid, regalados,
+    cajas, TVs, valor real) and optionally writes the PDF."""
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+    from . import alerts, reports
+    from . import parser as bstock_parser
+
+    settings = Settings.from_env()
+    client = BStockClient(cookie=settings.auth.cookie)
+
+    m = re.search(r"/id/(\d+)", args.url) or re.search(r"(\d{4,})", args.url)
+    if not m:
+        print("No pude extraer el id de subasta de la URL.", file=sys.stderr)
+        return 2
+    auction_id = int(m.group(1))
+    url = args.url if args.url.startswith("http") else f"{bstock_parser.BASE_URL}{args.url}"
+
+    # Detail page -> lot_id (and fallback metadata if the lot is not active).
+    try:
+        detail_html = client._get(url).text
+    except CloudflareChallenge as exc:
+        print(f"Cloudflare challenge: {exc}", file=sys.stderr)
+        return 2
+    lot_id = bstock_parser.parse_lot_id(detail_html)
+    if not lot_id:
+        print("No encontré el lot_id en la página. ¿La URL es de un lote de B-Stock?",
+              file=sys.stderr)
+        return 2
+    parts = lot_id.split("_")
+    country = parts[2] if len(parts) > 2 else None
+
+    # Prefer accurate metadata from the active listing (title/type/retail/bid/close).
+    auction = None
+    try:
+        for cand in client.list_auctions(country=country):
+            if cand.auction_id == auction_id:
+                auction = cand
+                auction.lot_id = lot_id
+                break
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("No pude leer la lista de %s: %s", country, exc)
+    if auction is None:
+        # Closed/not listed: build what we can from the detail page text.
+        from bs4 import BeautifulSoup
+        text = BeautifulSoup(detail_html, "html.parser").get_text(" ")
+        auction = Auction(
+            auction_id=auction_id, title="", url=url,
+            country=country or bstock_parser.parse_country(text),
+            lot_type=bstock_parser.parse_lot_type(text),
+            retail_value=bstock_parser.parse_retail_value(text),
+            pieces=bstock_parser.parse_pieces(text),
+        )
+        auction.lot_id = lot_id
+        print("(Lote no activo en la lista: sin datos de puja/cierre en vivo.)",
+              file=sys.stderr)
+
+    # Manifest: reuse cache ('ya analizado') or download.
+    csv_path = os.path.join(settings.manifest_dir, f"{auction_id}_{lot_id}.csv")
+    from_cache = os.path.exists(csv_path)
+    if not from_cache:
+        client.download_manifest(lot_id, csv_path)
+    items = analyzer.parse_manifest(csv_path)
+    if not items:
+        print("Manifiesto vacío o ilegible.", file=sys.stderr)
+        return 2
+    resolver = PriceResolver() if args.verify else None
+    result = insights.deep_analyze(items, label=f"{auction_id}_{lot_id}", resolver=resolver)
+    if resolver:
+        resolver.save_cache()
+    if not auction.retail_value:
+        auction.retail_value = result.total_retail
+
+    model = load_recovery()
+    calc = BidCalculator()
+    report = reports.LotReport(auction=auction, insights=result, csv_path=csv_path)
+    try:
+        report.decision = alerts.evaluate(auction, settings.rules, calc, model)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("No pude evaluar la decisión de puja: %s", exc)
+    try:
+        reports.compute_bids(report, model, calc, multiple=settings.rules.bid_multiple)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("No pude calcular la puja recomendada: %s", exc)
+
+    _print_lot_report(report, from_cache)
+    stem = f"{auction_id}_{lot_id}"
+    md_path = _write_report(insights.render_report(result), args.report_dir, stem)
+    print(f"\nInforme md: {md_path}")
+    if args.pdf:
+        pdf_path = reports.render_pdf(
+            result, os.path.join(args.report_dir, "pdf", f"{stem}.pdf"),
+            auction, report=report,
+        )
+        print(f"PDF completo: {pdf_path}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="liquidation_tracker",
@@ -527,6 +697,17 @@ def build_parser() -> argparse.ArgumentParser:
                            help="Try a live Amazon price check on doubtful giveaways")
     p_inspect.add_argument("--report-dir", default="data/reports")
     p_inspect.set_defaults(func=cmd_inspect)
+
+    p_lot = sub.add_parser(
+        "lot", help="Análisis completo de UN lote desde su URL de B-Stock "
+                    "(reusa el manifiesto si ya se analizó, si no lo baja)"
+    )
+    p_lot.add_argument("url", help="URL del lote, p.ej. https://bstock.com/amazoneu/auction/auction/view/id/52826/")
+    p_lot.add_argument("--verify", action="store_true",
+                       help="Verifica precios de regalados dudosos contra Amazon/BD")
+    p_lot.add_argument("--pdf", action="store_true", help="Escribe también el PDF")
+    p_lot.add_argument("--report-dir", default="data/reports")
+    p_lot.set_defaults(func=cmd_lot)
 
     p_manifests = sub.add_parser(
         "manifests", help="Download + deep-analyze manifests of all active auctions"

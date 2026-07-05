@@ -164,11 +164,21 @@ python -m liquidation_tracker.cli list --country ES      # subastas activas + pu
 python -m liquidation_tracker.cli bid --retail 50000 --type "4 Pallets"  # calculadora
 python -m liquidation_tracker.cli monitor                # un ciclo de alertas
 python -m liquidation_tracker.cli inspect <csv>          # análisis profundo de un manifiesto (md + PDF)
+python -m liquidation_tracker.cli lot <url>              # análisis COMPLETO de un lote desde su URL
 python -m liquidation_tracker.cli manifests --country ES # baja y analiza todos los activos
 python -m liquidation_tracker.cli rank --country ES      # ranking por recuperación + valor oculto
 python -m liquidation_tracker.cli watch                  # detectar lotes nuevos + WhatsApp
 python -m liquidation_tracker.cli digest                 # PDF combinado + email
 python -m liquidation_tracker.cli login                  # (opcional) login B-Stock, no hace falta
+```
+
+**`lot <url>` — pásale un enlace de B-Stock y te da el informe completo** (veredicto, puja
+recomendada, regalados, cajas sin declarar, TVs, valor real). Reusa el manifiesto si ya lo
+había bajado (*"CACHÉ (ya estaba analizado)"*); si no, lo descarga. Funciona con lotes activos
+(con puja/cierre en vivo) y cerrados (solo contenido). Opciones: `--verify` (precios contra
+Amazon/BD), `--pdf` (escribe también el PDF). Ejemplo:
+```bash
+python -m liquidation_tracker.cli lot "https://bstock.com/amazoneu/auction/auction/view/id/52826/"
 ```
 
 > **Nota (2026-07):** los lotes **MIXED también se descargan** (son públicos; antes fallaban por
