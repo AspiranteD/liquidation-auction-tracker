@@ -134,14 +134,38 @@ El PC debe estar encendido a las 12:30 para la ventana del monitor.
 git clone https://github.com/AspiranteD/liquidation-auction-tracker.git
 cd liquidation-auction-tracker
 pip install -r requirements.txt
-copy .env.example .env   # y rellenar (ver abajo)
 python -m pytest -q      # 75 tests deben pasar
 ```
 
-**El `.env` NO está en git** (lleva credenciales). Opciones: copia el del
-PC de casa (`C:\Users\guill\Claude\liquidation-auction-tracker\.env`) por
-MEGA/USB, o rellena `.env.example` con: API key de CallMeBot WhatsApp,
-teléfono, App Password de Gmail y usuario de Telegram para llamadas.
+**Los secretos NO se copian por USB ni MEGA: salen de Doppler.** Nada de pasearse
+el `.env` entre PCs — es lo que hacía que esto fuera un lío y que la copia de un PC
+se quedara vieja respecto a la del otro.
+
+```powershell
+winget install Doppler.doppler
+doppler setup --no-interactive   # lee doppler.yaml: proyecto+config, sin elegir nada
+```
+
+Falta el **service token** de este PC (read-only, no caduca, sin navegador). Créalo
+desde tu PC principal y pégalo aquí:
+
+```powershell
+# en tu PC principal:
+doppler configs tokens create "pc-<NOMBRE>" -p liquidation-tracker -c prd --access read --copy
+# en este PC (OJO: sin pipes — en PowerShell 5.1 un `echo TOK | ...` cuela un BOM
+# y el token queda corrupto con un error que no dice nada):
+doppler configure set "token=<PEGA_EL_TOKEN>" --scope .
+```
+
+A partir de ahí, **ejecuta siempre con `doppler run --`**, que inyecta los secretos
+por entorno sin escribir nada a disco:
+
+```powershell
+doppler run -- python -m liquidation_tracker.cli lot "<url>"
+```
+
+> Un `.env` local sigue funcionando (`config.py` hace `load_dotenv()`), pero es un
+> fallback, no el camino. Si lo usas, recuerda que `.env` está en `.gitignore`.
 
 Si quieres que el OTRO PC también monitorice, recrea las tareas (ajusta la
 ruta):
