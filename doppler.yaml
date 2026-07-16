@@ -1,0 +1,16 @@
+# Mapeo repo -> Doppler. Commiteado a propósito: NO contiene secretos, solo
+# declara de qué proyecto/config salen.
+#
+# Con este fichero, un PC nuevo se configura sin elegir nada de una lista:
+#
+#     doppler setup --no-interactive
+#     doppler run -- python -m liquidation_tracker.cli lot "<url>"
+#
+# Este repo NO materializa .env: `config.py` hace `load_dotenv()` (opcional) y
+# luego `os.getenv`, así que `doppler run` le inyecta todo por entorno y no hace
+# falta escribir credenciales a disco. Ejecuta SIEMPRE con `doppler run --`.
+#
+# Falta el token de auth, que SÍ es secreto y va por PC — ver GUIA.md.
+setup:
+  project: liquidation-tracker
+  config: prd

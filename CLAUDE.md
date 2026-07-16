@@ -48,7 +48,15 @@ Estas tareas apuntan a rutas **fijas** dentro de esta carpeta:
 
 ## Secretos y datos
 
-- `.env` está en `.gitignore` (**no** está en GitHub ni en Doppler). Restaurar desde backup.
+- **Los secretos viven en Doppler** (`liquidation-tracker/prd`), no en un `.env` que haya que
+  pasarse por USB. Este repo **no materializa `.env`**: `config.py` los lee del entorno, así
+  que ejecuta siempre con **`doppler run -- python -m liquidation_tracker.cli …`**.
+  `doppler.yaml` (commiteado, sin secretos) declara proyecto+config → un PC nuevo solo necesita
+  `doppler setup --no-interactive` y un service token. Un `.env` local sigue funcionando como
+  fallback (`load_dotenv()`), pero ya no es el camino.
+- **Alertas apagadas = secretos que faltan.** `config.py` lee `EMAIL_ALERTS_ENABLED` y compañía
+  con default `"false"`: si no están en Doppler, las alertas **no fallan, simplemente no salen**.
+  Para rellenarlas sin exponerlas: `python scripts/set_alert_creds.py`.
 - La carpeta `data/` (DB + manifiestos) tampoco está en git: es estado vivo, respaldar aparte.
 - **Login B-Stock (OPCIONAL, latente):** `cli login` autentica vía Playwright (FusionAuth SSO)
   con `BSTOCK_USER`/`BSTOCK_PASS`, guardados en **Doppler `liquidation-tracker/prd`**. Cachea la
