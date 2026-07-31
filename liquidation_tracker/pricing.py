@@ -22,13 +22,19 @@ import logging
 import os
 import random
 import re
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_ENV = r"C:\Users\guill\CursorProjects\_ARCHIVADO_reusalia-backend_usar_carpeta_Claude\.env"
+# OJO: hasta el 31-jul-2026 esto apuntaba a ...\CursorProjects\_ARCHIVADO_reusalia-backend...,
+# una carpeta que ya no existe. `ReusaliaDB._read_url` se traga el OSError y se marca como
+# fallida en silencio, así que el paso 2 (BD, ~27k ASIN ya scrapeados, gratis) llevaba
+# desactivado sin avisar y todo caía en el scraping racionado o en el "típico".
+DEFAULT_ENV = r"C:\Users\guill\Claude\reusalia-backend\.env"
 CACHE_PATH = "data/price_cache.json"
 AMAZON_URL = "https://www.amazon.es/dp/{asin}"
 
@@ -275,6 +281,7 @@ class PriceResolver:
         self._cache = self._load_cache(cache_path)
         self._cache_dirty = False
         self._consecutive_blocks = 0
+        self._lock = threading.Lock()  # `prewarm` resuelve en paralelo
         self._scraper = scraper
         self._db = db if db is not None else (ReusaliaDB(env_path) if use_db else None)
 
@@ -296,8 +303,50 @@ class PriceResolver:
 
     def _remember(self, asin: str, price: Optional[float], source: str) -> None:
         if price is not None:
-            self._cache[asin] = {"price": price, "source": source}
-            self._cache_dirty = True
+            with self._lock:
+                self._cache[asin] = {"price": price, "source": source}
+                self._cache_dirty = True
+
+    def cached(self, asin: Optional[str]) -> bool:
+        """¿Tenemos ya precio de este ASIN? Resolverlo entonces es gratis."""
+        if not asin:
+            return False
+        with self._lock:
+            entry = self._cache.get(asin)
+        return bool(entry and entry.get("price") is not None)
+
+    def prewarm(self, asins, workers: int = 3) -> int:
+        """Resuelve el precio de TODO el manifiesto y lo deja en caché, antes de juzgar.
+
+        Por qué existe: `find_giveaways` solo verificaba un puñado de sospechosos
+        (`max_verify=12`) y el resto se quedaba con el "típico mínimo conservador", que
+        el 31-jul-2026 tasó un MacBook Pro M4 en 600 € cuando valía 1.713 y se inventó
+        300 € en una tapa de objetivo que vale 8,99. Con la caché caliente, ningún
+        sospechoso se juzga a ojo.
+
+        🧨 **Amazon bloquea, pero con retardo.** Ese mismo día, 445 ASIN a 10 hilos y sin
+        pausa dieron 441 respuestas 200 y **cero** bloqueos... y ~20 min después los mismos
+        ASIN devolvían captcha desde la misma IP. O sea: que una tanda salga limpia NO
+        prueba que el ritmo sea sostenible. Por eso el default es conservador (3 hilos,
+        respetando `scrape_delay`) y el grueso del trabajo debe hacerlo la BD de Reusalia
+        (paso 2 del resolver, ~27k ASIN ya scrapeados, gratis). Si hace falta cobertura
+        completa a diario, la vía es una API de precios (Keepa), no subir los hilos.
+
+        Devuelve cuántos ASIN quedaron con precio. Nunca lanza: si Amazon empieza a
+        bloquear, `_scrape` corta solo por `max_blocks` y el resto cae en la heurística.
+        """
+        todo = [a for a in {a for a in asins if a} if not self.cached(a)]
+        if not todo:
+            return 0
+        try:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                list(pool.map(self.resolve, todo))
+        except Exception as exc:  # noqa: BLE001 - el prewarm nunca debe tumbar el análisis
+            logger.info("Prewarm de precios interrumpido (%s); sigo con lo que haya.", exc)
+        got = sum(1 for a in todo if self.cached(a))
+        logger.info("Prewarm: %d/%d ASIN con precio real (bloqueos seguidos: %d).",
+                    got, len(todo), self._consecutive_blocks)
+        return got
 
     def resolve(self, asin: Optional[str]) -> ResolvedPrice:
         if not asin:
@@ -344,7 +393,8 @@ class PriceResolver:
             data = self._scraper.scrape_price(asin, domain=domain)
             status = data.get("_status")
             if status == "blocked":
-                self._consecutive_blocks += 1
+                with self._lock:  # `prewarm` llama a esto desde varios hilos
+                    self._consecutive_blocks += 1
                 if self._consecutive_blocks >= self.max_blocks:
                     logger.warning(
                         "Amazon bloquea (%d seguidos): desactivo scraping este pase.",

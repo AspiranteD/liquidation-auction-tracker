@@ -72,6 +72,15 @@ Estas tareas apuntan a rutas **fijas** dentro de esta carpeta:
   Title-case) hasta obtener CSV. Si un tipo nuevo falla, añade su variante ahí.
 - **`fpdf2` es obligatorio** para `inspect`/`digest`/`watch` (generan PDF). Está en
   `requirements.txt`; si ves `ModuleNotFoundError: fpdf`, `pip install -r requirements.txt`.
+- 🧨 **Amazon bloquea CON RETARDO: una tanda limpia no prueba nada.** El 31-jul-2026, 445 ASIN
+  a 10 hilos y sin pausa dieron **441 respuestas 200 y cero bloqueos**… y ~20 min después los
+  mismos ASIN devolvían captcha desde la misma IP. Si ves un pase limpio, **no subas
+  `prewarm(workers=…)`**: el default conservador (3 hilos, respetando `scrape_delay`) es a
+  propósito. La cobertura barata la da el **paso 2 del resolver (BD de Reusalia)**, que cubre
+  el **29 %** de los ASIN de un lote nuevo gratis; para cobertura total a diario, la vía es
+  Keepa, no más hilos. Ojo: `ReusaliaDB` se traga el `OSError` si no encuentra el `.env` y se
+  marca fallida **en silencio** — `DEFAULT_ENV` estuvo apuntando a una carpeta archivada y el
+  paso 2 llevaba muerto sin avisar, con todo cayendo en el "típico" inventado.
 - **Detector de regalados** (`insights.py`): se fía de la **taxonomía del manifiesto**
   (category/subcategory) para descartar juegos/accesorios (p.ej. "PS5 Games", "Controllers"),
   igual que la detección de TVs. El heurístico "1 caja → 5 regaladas" solo aplica si el lote

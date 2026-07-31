@@ -542,6 +542,10 @@ def find_giveaways(
             suspects, key=lambda s: s[2] - s[0].unit_retail, reverse=True
         )[:max_verify]
     } if resolver else set()
+    # Un precio que YA está en caché (o en la BD) no gasta presupuesto de scraping:
+    # racionarlo solo servía para publicar un "típico" inventado teniendo el real a mano.
+    if resolver is not None:
+        verify_ids |= {id(item) for item, _, _ in suspects if resolver.cached(item.asin)}
 
     for item, pattern, typical in suspects:
         url = AMAZON_URL.format(asin=item.asin) if item.asin else None
@@ -843,6 +847,12 @@ def deep_analyze(
     tvs = find_tvs(items, rules)
     tv_units = sum(t.item.qty for t in tvs)
     tv_loss = round(sum(t.item.line_retail for t in tvs), 2)
+
+    # Precio real de TODO el manifiesto antes de juzgar nada: en paralelo cuesta minutos y
+    # es lo único que distingue un regalado de verdad de un falso positivo (ver prewarm()).
+    if resolver is not None:
+        resolver.prewarm([i.asin for i in items])
+        resolver.save_cache()
 
     giveaways = find_giveaways(items, rules, resolver=resolver, max_verify=max_verify)
 
