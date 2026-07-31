@@ -193,12 +193,19 @@ class ReusaliaDB:
 
     @staticmethod
     def _read_url(env_path: str) -> Optional[str]:
+        # El entorno manda: con `doppler run --` la credencial llega por ahí y no hay
+        # fichero que se quede viejo ni ruta que dependa del PC. El .env es el fallback.
+        from_env = os.environ.get("DATABASE_URL")
+        if from_env:
+            return from_env.strip()
         try:
             with open(env_path, encoding="utf-8") as fh:
                 for line in fh:
                     if line.startswith("DATABASE_URL="):
                         return line.split("=", 1)[1].strip().strip('"').strip("'")
         except OSError:
+            logger.info("Sin DATABASE_URL en entorno ni en %s: el resolver se queda "
+                        "sin el paso de BD (solo caché + scraping).", env_path)
             return None
         return None
 

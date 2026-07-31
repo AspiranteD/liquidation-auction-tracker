@@ -544,8 +544,10 @@ def find_giveaways(
     } if resolver else set()
     # Un precio que YA está en caché (o en la BD) no gasta presupuesto de scraping:
     # racionarlo solo servía para publicar un "típico" inventado teniendo el real a mano.
-    if resolver is not None:
-        verify_ids |= {id(item) for item, _, _ in suspects if resolver.cached(item.asin)}
+    # El contrato del resolver es solo `resolve`; `cached` es opcional (stubs de test).
+    is_cached = getattr(resolver, "cached", None)
+    if callable(is_cached):
+        verify_ids |= {id(item) for item, _, _ in suspects if is_cached(item.asin)}
 
     for item, pattern, typical in suspects:
         url = AMAZON_URL.format(asin=item.asin) if item.asin else None
