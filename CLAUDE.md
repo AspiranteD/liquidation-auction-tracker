@@ -85,6 +85,30 @@ Estas tareas apuntan a rutas **fijas** dentro de esta carpeta:
   (category/subcategory) para descartar juegos/accesorios (p.ej. "PS5 Games", "Controllers"),
   igual que la detección de TVs. El heurístico "1 caja → 5 regaladas" solo aplica si el lote
   tiene algún pallet multi-caja real (los MIXED mapean 1 caja por pallet y lo inflaban).
+- 🔴 **El formato del pallet lo DECLARA el manifiesto en su columna `FC` — no se deduce del peso.**
+  `MAD4` = pallet de cajas (siempre 6 físicas); `MAD6`/`XMA8`/`MXP5`/`XMP3` = pallet entero de un
+  solo bulto. Medido sobre **731 pallets de 103 manifiestos**, 0 excepciones, y ningún MAD4 declara
+  más de 6. ⛔ **No vuelvas a clasificar por unidades/peso**: esa heurística fallaba en las **dos**
+  direcciones y con dinero de por medio — en el lote 54360 se **inventaba** 5 cajas (7.699 EUR) sobre
+  un MAD6, y en el 54639 se **dejaba sin contar** 5 cajas reales (3.278 EUR) porque sus artículos
+  pesaban demasiado. Un `FC` que no esté en esas listas cae a la heurística de siempre, no se adivina.
+- 🔴 **Dos parámetros de coste que estaban mal y hacían pujar de MÁS en todos los lotes:**
+  el **fee de B-Stock era 4 %** cuando la propia ficha lo publica en un campo oculto
+  (`buyersPremiumPercent`, leído **0,05** el 2026-08-05 — subió en 2026); y el **transporte de
+  un lote de 1-3 palés** no casaba con ninguna tarifa, así que entraba a **0 €**. Un lote de
+  2 palés y 20.160 € de retail daba una puja máxima de **1.365 €** cuando son **659 €**. Regla:
+  **1-3 palés se facturan como 4** (se paga el hueco del camión). El fee vive **en espejo** con
+  `scripts/services/bstock/calculator.py` del backend.
+- 🔴 **La regla de compra del dueño es el 9 % de coste total** (`TARGET_COST_PCT` en `ranking.py`,
+  columna `PUJA_9%`), y ese número se pega en el campo nativo **«Your Maximum Bid»** de B-Stock.
+  ⛔ **No montes un bot de pujas**: la puja automática ya la hace la plataforma; automatizarla por
+  fuera solo añade riesgo de cuenta. La base del 9 % es el retail **sin TVs**.
+- 🔴 **Un lote que NO sale en el listado suele ser de PRECIO FIJO («Buy Now»), no uno cerrado.**
+  Esos no se subastan, así que nunca aparecen en `list_auctions`, y antes el informe los daba por
+  **«sin pujas» y en VERDE**: el 54639 salía como chollo cuando su precio era **fijo, 10.180 EUR,
+  casi el doble** del máximo recomendado (5.670). El precio se lee de la propia ficha
+  (`parse_is_fixed_price` / `parse_headline_price`, funcionan **sin login**) y el veredicto pasa a
+  ROJO. ⚠️ En un Buy Now no hay nada que esperar: el número es final, no una puja que aún tiene aire.
 
 ## Convenciones
 

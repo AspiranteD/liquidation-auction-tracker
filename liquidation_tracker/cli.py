@@ -612,8 +612,18 @@ def cmd_lot(args: argparse.Namespace) -> int:
             pieces=bstock_parser.parse_pieces(text),
         )
         auction.lot_id = lot_id
-        print("(Lote no activo en la lista: sin datos de puja/cierre en vivo.)",
-              file=sys.stderr)
+        # A lot missing from the listing is usually either closed OR a fixed
+        # price "Buy Now" (those are never auctioned, so they never show up).
+        # Read the headline price off the page: without it the report says
+        # "sin pujas" and reads as a bargain when the price is actually final.
+        auction.is_fixed_price = bstock_parser.parse_is_fixed_price(detail_html)
+        auction.current_bid = bstock_parser.parse_headline_price(detail_html)
+        if auction.is_fixed_price:
+            print(f"(Lote de PRECIO FIJO «Buy Now»: {auction.current_bid:,.0f} EUR. "
+                  f"No se puja — se paga eso o nada.)", file=sys.stderr)
+        else:
+            print("(Lote no activo en la lista: sin datos de cierre en vivo.)",
+                  file=sys.stderr)
 
     # Manifest: reuse cache ('ya analizado') or download.
     csv_path = os.path.join(settings.manifest_dir, f"{auction_id}_{lot_id}.csv")

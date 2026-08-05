@@ -26,7 +26,12 @@ from .alerts import lot_family
 from .calculator import BidCalculator
 from .insights import ManifestInsights
 from .models import Auction
-from .recovery import DEFAULT_MULTIPLE, RecoveryModel
+from .recovery import DEFAULT_MULTIPLE, RecoveryModel, transport_key
+
+# The owner's flat bidding rule: never let the LANDED cost exceed this share of
+# the retail. Drives the PUJA_9% column, which is the number he types straight
+# into B-Stock's native "Your Maximum Bid" field.
+TARGET_COST_PCT = 0.09
 
 
 @dataclass
@@ -45,6 +50,11 @@ class LotRanking:
     hidden_value: float           # giveaway_sure + gifted_boxes
     score: float                  # expected_revenue + hidden_value
     recommended_bid: float        # recovery-based max bid (landed = revenue/multiple)
+    # Flat rule the owner bids by: the number to type into B-Stock's own "Your
+    # Maximum Bid" so the LANDED cost (bid + transport + IVA + fee + RE) lands on
+    # TARGET_COST_PCT of the retail. Base is effective retail (TVs excluded: they
+    # recover ~0, so 9% of a TV's retail is money burnt).
+    bid_target_pct: float
     current_bid: float
     headroom: float               # recommended_bid - current_bid (>0 = still buyable)
     url: str
@@ -75,6 +85,9 @@ def rank_lot(
     expected_revenue = base_retail * blend.recovery
     hidden = insights.giveaway_value_sure + insights.gifted_box_value_point
     current = auction.current_bid or 0.0
+    flat = calculator.max_bid_for_retail_pct(
+        base_retail, TARGET_COST_PCT, transport_key(family, auction.country)
+    )
     return LotRanking(
         auction_id=auction.auction_id,
         title=(auction.title or "")[:80],
@@ -90,6 +103,7 @@ def rank_lot(
         hidden_value=round(hidden, 2),
         score=round(expected_revenue + hidden, 2),
         recommended_bid=round(rec.bid, 2),
+        bid_target_pct=round(flat.bid, 2),
         current_bid=round(current, 2),
         headroom=round(rec.bid - current, 2),
         url=auction.url or "",
@@ -106,8 +120,8 @@ _COLS = [
     ("recup%", "recovery", 7), ("cob%", "coverage", 6),
     ("ing_esp", "expected_revenue", 9), ("regalad", "giveaway_sure", 8),
     ("cajas_oc", "gifted_boxes", 9), ("SCORE", "score", 10),
-    ("puja_max", "recommended_bid", 9), ("puja_act", "current_bid", 9),
-    ("margen", "headroom", 9),
+    ("puja_max", "recommended_bid", 9), ("PUJA_9%", "bid_target_pct", 9),
+    ("puja_act", "current_bid", 9), ("margen", "headroom", 9),
 ]
 
 

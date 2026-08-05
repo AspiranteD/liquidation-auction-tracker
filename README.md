@@ -59,15 +59,18 @@ bid you can place:
 total_cost = bid + transport + VAT + bstock_fee + RE
 
 VAT        = (transport + bid) × 21%
-bstock_fee = bid × 4%
+bstock_fee = bid × 5%               (buyer premium; was 4% before 2026)
 RE         = total_cost × 5.2%      (recargo de equivalencia)
 ```
 
 Solving for `bid`:
 
 ```
-max_bid = (total_cost − transport×1.21 − 0.052×total_cost) / (1 + 0.04 + 0.21)
+max_bid = (total_cost − transport×1.21 − 0.052×total_cost) / (1 + 0.05 + 0.21)
 ```
+
+Transport is a flat rate per lot type. A **part load of 1-3 pallets is billed as a
+4-pallet load** — you pay for the truck slot, not per pallet.
 
 ```bash
 $ python -m liquidation_tracker.cli bid --retail 16670 --type "Small Truckload" --pct 0.25

@@ -44,10 +44,27 @@ def test_vat_is_21_percent_of_bid_plus_transport():
     assert math.isclose(b.vat, expected_vat, abs_tol=0.05)
 
 
-def test_bstock_fee_is_4_percent_of_bid():
+def test_bstock_fee_is_5_percent_of_bid():
+    # B-Stock raised the buyer premium 4% -> 5% in 2026. Read straight off a live
+    # lot page on 2026-08-05 (hidden field `buyersPremiumPercent` = 0.05), and it
+    # matches the backend (scripts/services/bstock/calculator.py). Understating it
+    # inflates every max bid.
     calc = BidCalculator()
     b = calc.cost_breakdown_for_bid(1500.0, "Truckload")
-    assert math.isclose(b.bstock_fee, 1500.0 * 0.04, abs_tol=0.05)
+    assert math.isclose(b.bstock_fee, 1500.0 * 0.05, abs_tol=0.05)
+
+
+def test_part_load_pallets_cost_the_same_transport_as_four():
+    # A 2- or 3-pallet lot rides the same truck slot as a 4-pallet one, so it is
+    # billed the same (dueño, 2026-08-05). Before this, "2 Pallets" matched no
+    # tariff, transport silently counted 0 EUR and the max bid came out inflated.
+    calc = BidCalculator()
+    cuatro = calc.transport_for("4 Pallets")
+    assert calc.transport_for("2 Pallets") == cuatro
+    assert calc.transport_for("3 Pallets") == cuatro
+    assert calc.transport_for("2 Pallets DE") == calc.transport_for("4 Pallets DE")
+    # ...and an unknown type still falls back to 0, as before.
+    assert calc.transport_for("9 Pallets") == 0.0
 
 
 def test_max_bid_never_negative():
