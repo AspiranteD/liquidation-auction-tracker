@@ -26,11 +26,16 @@ returns the original input.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, asdict
 from typing import Dict, Optional
 
 VAT_RATE = 0.21          # IVA
-BSTOCK_FEE_RATE = 0.04   # B-Stock buyer fee
+# B-Stock buyer premium. Was 4%; they raised it to 5% in 2026 and the lot page
+# still ships the live value in a hidden field (`buyersPremiumPercent`, read as
+# 0.05 on 2026-08-05). Understating it inflates every recommended bid, so keep
+# this in step with the backend (scripts/services/bstock/calculator.py).
+BSTOCK_FEE_RATE = 0.05
 RE_RATE = 0.052          # Recargo de equivalencia (Spanish resale surcharge)
 
 # Flat transport cost per lot type (EUR). These are generic logistics rates;
@@ -43,6 +48,12 @@ DEFAULT_TRANSPORT_COSTS: Dict[str, float] = {
     "4 Pallets IT": 750.0,
     "4 Pallets": 318.99,
 }
+
+# A 1-3 pallet lot rides the same truck as a 4-pallet one and is billed the
+# same: you pay for the slot, not per pallet (dueño, 2026-08-05). Without this
+# "2 Pallets" matched no tariff, transport silently counted as 0 EUR and the
+# max bid came out INFLATED (1,365 EUR instead of 1,108 on a 20,160 EUR lot).
+_PARTIAL_PALLET_RE = re.compile(r"^([123])\s+pallets?(\s+[a-z]{2})?$")
 
 
 @dataclass
@@ -102,6 +113,10 @@ class BidCalculator:
         if not lot_type:
             return 0.0
         normalized = lot_type.strip().lower()
+        # 1-3 pallets are billed as a 4-pallet load (same truck slot).
+        partial = _PARTIAL_PALLET_RE.match(normalized)
+        if partial:
+            normalized = f"4 pallets{partial.group(2) or ''}"
         for key, value in self.transport_costs.items():
             if key.lower() == normalized:
                 return value

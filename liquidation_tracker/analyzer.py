@@ -30,6 +30,7 @@ _FIELD_ALIASES = {
     "weight_uom": ["itempkgweightuom", "item pkg weight uom"],
     "pallet_id": ["pallet id", "pallet_id", "palletid"],
     "box_id": ["pkgid", "pkg id", "box id", "box_id"],
+    "fc": ["fc", "fulfillment center", "fulfilment centre"],
 }
 
 
@@ -125,6 +126,7 @@ def parse_manifest(csv_path: str) -> List[ManifestItem]:
                     weight_kg=weight_kg or None,
                     pallet_id=row.get(idx.get("pallet_id", "")) or None,
                     box_id=row.get(idx.get("box_id", "")) or None,
+                    fc=(row.get(idx.get("fc", "")) or "").strip().upper() or None,
                 )
             )
     return items

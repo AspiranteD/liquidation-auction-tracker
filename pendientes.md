@@ -24,12 +24,18 @@ que queda abierto, por prioridad.
 
 ## Mejoras técnicas pendientes
 
-4. **Scraping de Amazon para cajas sospechosas**: pedido por Guillem
-   ("hacerlo siempre para ese tipo de cajas"). Hoy el informe lista el
-   contenido con enlaces; falta el fetch automático de dimensiones/precio
-   por ASIN. Amazon bloquea bots: valorar API de Keepa (~19 €/mes, fiable)
-   antes de invertir en scraping frágil. `verify_giveaway_prices()` en
-   `insights.py` ya es el gancho experimental.
+4. **Precio real por ASIN — hecho a medias (31-jul-2026), falta la fuente fiable.**
+   Ya no se raciona: `deep_analyze` llama a `PriceResolver.prewarm()` y calienta
+   la caché con TODO el manifiesto antes de juzgar nada, y las resoluciones que ya
+   están en caché/BD no gastan presupuesto. Efecto medido en el lote 54293: pasó de
+   "2 regalados por 880 €" a **1 regalado real de 1.697 €** (MacBook Pro M4 tasado a
+   600 € por el "típico" cuando vale 1.713) y el falso positivo de la tapa de objetivo
+   (300 € inventados, vale 8,99) **se cayó solo**.
+   Lo que falta es la **cobertura**: la BD de Reusalia (paso 2, arreglado — apuntaba a
+   una carpeta archivada) resuelve el **29 %** de un lote nuevo gratis, y el scraping
+   directo **no es sostenible**: 445 ASIN a 10 hilos salieron limpios y ~20 min después
+   la IP estaba con captcha. Sigue en pie valorar **Keepa (~19 €/mes)**; es la única vía
+   para tener el 100 % del manifiesto verificado todos los días.
 5. **PDF del digest diario con el diseño nuevo**: el estudio de camiones ya
    usa el diseño dashboard (`scripts/render_estudio_pdf.py`); portar ese
    estilo (KPIs, semáforo) a `reports.py::build_digest_pdf` para los emails

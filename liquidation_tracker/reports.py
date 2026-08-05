@@ -90,6 +90,15 @@ def price_status(report: "LotReport") -> str:
         f"máx recomendada {d.recommended_bid:,.0f} EUR (recuperación {d.recovery:.0%})"
         if d and d.recommended_bid else "máx recomendada n/a"
     )
+    if a.is_fixed_price:
+        # Fixed price: there is nothing to wait for and no room to bid under it.
+        # The only question is whether that number is above or below our max.
+        verdict = ""
+        if d and d.recommended_bid and a.current_bid:
+            verdict = (" — POR ENCIMA del máximo: NO comprar."
+                       if a.current_bid > d.recommended_bid
+                       else " — por debajo del máximo.")
+        return f"PRECIO FIJO «Buy Now» {bid} (no se puja) · {rec}{verdict}"
     if mins is None:
         return f"Puja {bid} · {rec}."
     if mins < 0:

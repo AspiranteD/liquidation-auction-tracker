@@ -536,3 +536,53 @@ def test_render_report_smoke():
     assert "Televisores" in report
     assert "regalados" in report.lower()
     assert "iPhone" in report
+
+
+# --- Formato de pale segun la columna FC del manifiesto ------------------
+# Medido el 2026-08-05 sobre 731 pales de 103 manifiestos publicos, sin una
+# sola excepcion: MAD4 es el pale de CAJAS (1-6 declaradas, nunca mas de 6) y
+# MAD6/XMA8/MXP5/XMP3 son pales ENTEROS (1 solo bulto en 496 de 496). El FC
+# manda sobre cualquier heuristica de peso/unidades, y se puede leer ANTES de
+# pujar. Los dos tests de abajo son los dos errores reales que esto corrigio.
+
+def _pallet_fc(pallet_id, fc, boxes, unit_retail=25.0, weight_kg=None):
+    """Un pale con FC explicito. `boxes` es {box_id: unidades}."""
+    items = []
+    for box_id, units in boxes.items():
+        for _ in range(units):
+            items.append(
+                _item(pallet_id=pallet_id, box_id=box_id, fc=fc,
+                      unit_retail=unit_retail, weight_kg=weight_kg)
+            )
+    return items
+
+
+def test_pale_entero_nunca_regala_cajas_aunque_lleve_muchos_articulos_ligeros():
+    # Caso real: lote 54360, pale 10241751 (FC=MAD6, 1 bulto, 34 uds ligeras).
+    # La heuristica lo leia como "una caja de seis" e inventaba 5 cajas
+    # regaladas por 7.699 EUR que no existen. El FC dice pale ENTERO.
+    items = _pallet_fc("P1", "MAD6", {"B1": 34}, unit_retail=45.0, weight_kg=2.4)
+    _, pallets = insights.analyze_containers(items)
+    assert pallets[0].pallet_type != "cajas"
+    assert not pallets[0].missing_boxes
+    assert not pallets[0].missing_value_point
+
+
+def test_pale_mad4_con_un_solo_bulto_declara_cinco_cajas_regaladas():
+    # Caso real: lote 54639, pale 10241065 (FC=MAD4, declara 1 de 6). Como sus
+    # articulos son pesados, la heuristica NO lo veia y se dejaba 5 cajas
+    # (~3.278 EUR) sin contar. El FC lo zanja: MAD4 => pale de cajas.
+    items = _pallet_fc("P1", "MAD4", {"B1": 12}, unit_retail=55.0, weight_kg=4.1)
+    _, pallets = insights.analyze_containers(items)
+    assert pallets[0].pallet_type == "cajas"
+    assert pallets[0].missing_boxes == 5
+    assert pallets[0].missing_value_point > 0
+
+
+def test_fc_desconocido_cae_en_la_heuristica_de_siempre():
+    # Un FC que no hemos validado no se adivina: se mantiene el comportamiento
+    # anterior (2+ bultos declarados => pale de cajas).
+    items = _pallet_fc("P1", "ZZZ9", {"B1": 40, "B2": 38, "B3": 41})
+    _, pallets = insights.analyze_containers(items)
+    assert pallets[0].pallet_type == "cajas"
+    assert pallets[0].missing_boxes == 3

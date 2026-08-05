@@ -37,7 +37,9 @@ def lot_family(lot_type: Optional[str]) -> Optional[str]:
         return "Small Truckload"
     if normalized.startswith("truckload"):
         return "Truckload"
-    if normalized.startswith("4 pallets"):
+    # 1-3 pallet part loads are billed as a 4-pallet load (same truck slot), so
+    # they share its transport tariff and its recovery family.
+    if re.match(r"^[1-4] pallets?\b", normalized):
         return "4 Pallets"
     return None
 

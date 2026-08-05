@@ -29,11 +29,23 @@ Todo corre solo en el PC de casa con tareas programadas de Windows.
 - Solo subastas de **España** de tipo **4 Pallets** (retail ≥ 20.000 €),
   **Small Truckload** (≥ 50.000 €) o **Truckload** (≥ 100.000 €).
 - Interesa si el **COSTE TOTAL** (puja + transporte + IVA 21% + fee B-Stock
-  4% + recargo de equivalencia 5,2%) queda **≤ 12% del retail** — o **≤ 15%
+  **5%** + recargo de equivalencia 5,2%) queda **≤ 12% del retail** — o **≤ 15%
   si el lote lleva electrónica** (Wireless, PC Goods, cámaras...). La puja
   en sí suele quedar entonces en el 5-10% del retail.
 - La **calculadora de puja máxima** resuelve el modelo de costes al revés:
   te dice cuánto puedes pujar como máximo para no pasarte del techo.
+- 🔴 **La regla que usa el dueño en la práctica es el 9 % de COSTE TOTAL**, y sale ya
+  calculada en la columna **`PUJA_9%`** del `rank` (constante `TARGET_COST_PCT` en
+  `ranking.py`). Ese número **se pega tal cual** en el campo **«Your Maximum Bid»** de
+  la ficha de B-Stock: la plataforma puja sola hasta ese tope, subiendo lo mínimo.
+  ⛔ **Por eso NO hay que montar ningún bot de pujas**: la puja automática ya es nativa,
+  y automatizarla por fuera arriesga la cuenta sin ganar nada.
+  ⚠️ La base del 9 % es el **retail sin TVs** (`effective_retail`): las teles recuperan ~0,
+  así que pagar el 9 % de su retail es dinero quemado.
+- **Transporte: un lote de 1-3 palés se factura como uno de 4** (se paga el hueco del
+  camión, no el palé). Antes «2 Pallets» no casaba con ninguna tarifa, el transporte
+  entraba a **0 €** y la puja máxima salía inflada — 1.365 € en vez de 659 € en un lote
+  de 20.160 € de retail.
 
 ## 3. Alertas de pujas (monitor)
 

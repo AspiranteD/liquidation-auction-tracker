@@ -113,3 +113,29 @@ def test_max_verify_caps_resolution_to_top_value(tmp_path):
     insights.find_giveaways(items, resolver=Counting(), max_verify=1)
     # MacBook (typical 600) outranks AirPods (typical 100) for the budget.
     assert asked == ["B0BIG"]
+
+
+def test_cached_price_is_never_rationed_by_max_verify():
+    """Un precio ya en caché cuesta cero: no debe competir por el presupuesto.
+
+    Antes se racionaba junto con los scrapes y un sospechoso fuera del top-N se
+    publicaba con el "típico" inventado teniendo el precio real a mano — así se
+    coló una tapa de objetivo de 8,99 EUR valorada en 300 (lote 54293, 31-jul-2026).
+    """
+    asked = []
+
+    class CachingResolver:
+        def resolve(self, asin):
+            asked.append(asin)
+            return ResolvedPrice(asin, 1046.0, "cache", "alta")
+
+        def cached(self, asin):
+            return asin == "B0SMALL"
+
+    items = [
+        _item(description="Apple MacBook Air M4", unit_retail=16.0, asin="B0BIG"),
+        _item(description="Apple AirPods", unit_retail=5.0, asin="B0SMALL"),
+    ]
+    insights.find_giveaways(items, resolver=CachingResolver(), max_verify=1)
+    # B0BIG entra por presupuesto; B0SMALL entra gratis por estar cacheado.
+    assert sorted(asked) == ["B0BIG", "B0SMALL"]

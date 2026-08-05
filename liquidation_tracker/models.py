@@ -20,6 +20,10 @@ class Auction:
     current_bid: Optional[float] = None
     end_time: Optional[datetime] = None
     lot_id: Optional[str] = None  # B-Stock SKU used to download the manifest
+    # "Buy Now" lots are sold at a fixed price instead of being auctioned. They
+    # are absent from the auction listing, so `current_bid` holds that fixed
+    # price and it is FINAL — never treat it as a bid that still has room.
+    is_fixed_price: bool = False
     scraped_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
@@ -48,6 +52,10 @@ class ManifestItem:
     weight_kg: Optional[float] = None
     pallet_id: Optional[str] = None   # physical pallet ("Pallet ID")
     box_id: Optional[str] = None      # physical box/package ("PkgID")
+    # Amazon fulfilment centre ("FC"). Decides the pallet FORMAT, and it is the
+    # only reliable discriminator: MAD4 = pallet of ~6 stacked Amazon boxes,
+    # anything else (MAD6/XMA8/MXP5/XMP3) = one single sealed pallet.
+    fc: Optional[str] = None
 
     @property
     def line_retail(self) -> float:

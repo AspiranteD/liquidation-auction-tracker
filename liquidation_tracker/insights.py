@@ -52,6 +52,21 @@ def load_baselines(path: str = BASELINES_PATH) -> Dict:
 
 
 # ---------------------------------------------------------------------------
+# Pallet format: the manifest says it outright (column "FC")
+# ---------------------------------------------------------------------------
+# Measured 2026-08-05 over 731 pallets in 103 public manifests, zero exceptions:
+#
+#   MAD4 -> 235 pallets, 1-6 declared boxes  {1:7, 2:3, 3:4, 4:15, 5:67, 6:139}
+#   MAD6 -> 385 pallets | XMA8 -> 95 | MXP5 -> 13 | XMP3 -> 3  ... all with 1
+#
+# So MAD4 is the "pallet de cajas" and the rest are single sealed pallets. This
+# is checkable BEFORE bidding, which is the whole point: it is the difference
+# between knowing a lot hides free boxes and guessing it from item weights.
+BOX_PALLET_FC = "MAD4"
+WHOLE_PALLET_FCS = frozenset({"MAD6", "XMA8", "MXP5", "XMP3"})
+
+
+# ---------------------------------------------------------------------------
 # Tunable rules
 # ---------------------------------------------------------------------------
 
@@ -81,6 +96,7 @@ class InsightRules:
 
     # Amazon stacks this many boxes per "pallet de cajas". Validated on 217
     # historical box-pallets: distribution {4:11, 5:55, 6:148}, max=mode=6.
+    # Re-confirmed 2026-08-05 on 235 public MAD4 pallets: max=6, never above.
     # Fewer declared boxes => whole boxes travel undeclared (gifted).
     expected_boxes_per_pallet: int = 6
 
@@ -542,6 +558,12 @@ def find_giveaways(
             suspects, key=lambda s: s[2] - s[0].unit_retail, reverse=True
         )[:max_verify]
     } if resolver else set()
+    # Un precio que YA está en caché (o en la BD) no gasta presupuesto de scraping:
+    # racionarlo solo servía para publicar un "típico" inventado teniendo el real a mano.
+    # El contrato del resolver es solo `resolve`; `cached` es opcional (stubs de test).
+    is_cached = getattr(resolver, "cached", None)
+    if callable(is_cached):
+        verify_ids |= {id(item) for item, _, _ in suspects if is_cached(item.asin)}
 
     for item, pattern, typical in suspects:
         url = AMAZON_URL.format(asin=item.asin) if item.asin else None
@@ -685,7 +707,25 @@ def analyze_containers(
         avg_weight = total_w / total_q if total_q else None
         units = sum(i.qty for i in p_items)
 
-        if len(box_ids) >= 2:
+        # The manifest DECLARES the pallet format in its FC column, and that beats
+        # every units/weight heuristic. Measured on 731 pallets across 103 public
+        # manifests: MAD4 pallets declare 1-6 boxes and NEVER more than 6 (an
+        # independent confirmation of the 6-box rule), while MAD6/XMA8/MXP5/XMP3
+        # declare exactly one package in 496 of 496 cases. An FC we have not
+        # validated falls through to the heuristic rather than guessing.
+        fc_codes = {i.fc for i in p_items if i.fc}
+        if fc_codes == {BOX_PALLET_FC}:
+            pallet_type = "cajas"
+        elif fc_codes and fc_codes <= WHOLE_PALLET_FCS:
+            # One sealed pallet: it can never contribute gifted boxes. Deciding
+            # this here is what stops the heuristic inventing five phantom boxes
+            # on a single-package pallet full of small light items.
+            pallet_type = (
+                "objetos grandes"
+                if avg_weight is not None and avg_weight >= rules.large_object_weight_kg
+                else "granel"
+            )
+        elif len(box_ids) >= 2:
             pallet_type = "cajas"
         elif (
             lot_has_multibox
@@ -843,6 +883,12 @@ def deep_analyze(
     tvs = find_tvs(items, rules)
     tv_units = sum(t.item.qty for t in tvs)
     tv_loss = round(sum(t.item.line_retail for t in tvs), 2)
+
+    # Precio real de TODO el manifiesto antes de juzgar nada: en paralelo cuesta minutos y
+    # es lo único que distingue un regalado de verdad de un falso positivo (ver prewarm()).
+    if resolver is not None:
+        resolver.prewarm([i.asin for i in items])
+        resolver.save_cache()
 
     giveaways = find_giveaways(items, rules, resolver=resolver, max_verify=max_verify)
 

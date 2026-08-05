@@ -21,8 +21,12 @@ _PIECES_RE = re.compile(r"([\d.,]+)\s+Pieces", re.IGNORECASE)
 # The country suffix ("4 Pallets DE") must stay case-sensitive: with IGNORECASE
 # it would swallow the "of" in "4 Pallets of Auto Goods" and produce an unknown
 # lot type whose transport cost resolves to 0.
+# B-Stock also sells part loads ("2 Pallets of ...", "3 Pallets of ..."). They
+# used to fall through as an unknown type, which made transport resolve to 0 and
+# the max bid come out too high — they ride the same truck as a 4-pallet lot and
+# cost the same.
 _LOT_TYPE_RE = re.compile(
-    r"(Small Truckload|Truckload|4 Pallets(?-i:\s+[A-Z]{2}\b)?)", re.IGNORECASE
+    r"(Small Truckload|Truckload|[1-4] Pallets?(?-i:\s+[A-Z]{2}\b)?)", re.IGNORECASE
 )
 _COUNTRY_RE = re.compile(r"\b([A-Z]{2})\s+Stock\b")
 _ID_RE = re.compile(r"/id/(\d+)")
@@ -132,3 +136,46 @@ def parse_lot_id(detail_html: str) -> Optional[str]:
                 # resolved at download time (see client._sku_candidates).
                 return match.group(1).upper()
     return None
+
+
+_FIXED_PRICE_RE = re.compile(
+    r'id=["\']isFixedPrice["\'][^>]*value=["\']([^"\']*)["\']', re.I
+)
+_HEADLINE_PRICE_RE = re.compile(
+    r'id=["\']current_bid_amount["\'][^>]*>(.*?)</span>', re.I | re.S
+)
+_HEADLINE_LABEL_RE = re.compile(
+    r'id=["\']current_bid_label["\'][^>]*>(.*?)</div>', re.I | re.S
+)
+
+
+def parse_is_fixed_price(detail_html: str) -> bool:
+    """True when the lot is sold at a fixed 'Buy Now' price, not auctioned.
+
+    These lots never appear in the active auction listing, so without this the
+    caller sees no bid at all and reads the lot as 'sin pujas' — the exact
+    opposite of the truth, since the price is already final and take-it-or-
+    leave-it."""
+    match = _FIXED_PRICE_RE.search(detail_html or "")
+    return bool(match) and match.group(1).strip().lower() in ("true", "1")
+
+
+def parse_headline_price(detail_html: str) -> Optional[float]:
+    """The big number on a lot page: the current bid, or the Buy Now price on a
+    fixed-price lot. The label right above it says which (parse_is_fixed_price).
+    Works logged out, which is when the listing metadata is unavailable."""
+    match = _HEADLINE_PRICE_RE.search(detail_html or "")
+    if not match:
+        return None
+    # Strip the currency symbol (its encoding varies) and any markup.
+    raw = re.sub(r"<[^>]+>", "", match.group(1))
+    digits = re.search(r"[\d][\d,.]*", raw)
+    return _to_float(digits.group(0)) if digits else None
+
+
+def parse_headline_label(detail_html: str) -> Optional[str]:
+    """'Buy Now' or 'Current bid' — whatever the page prints above the price."""
+    match = _HEADLINE_LABEL_RE.search(detail_html or "")
+    if not match:
+        return None
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", match.group(1))).strip() or None
