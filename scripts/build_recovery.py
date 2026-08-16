@@ -5,6 +5,20 @@ La recuperación = ingresos reales (sum final_price de ventas) / retail B-Stock
 estimado del ítem. Es la base para recomendar la puja: no usamos reglas fijas
 (12%/15%), sino cuánto recupera de verdad cada departamento/categoría.
 
+🔴 Las TELEVISIONES van APARTE y no entran en ninguna métrica (decisión del
+dueño, 2026-08-17: «las TV van aparte, no tienen que entrar en ninguna
+métrica»). Se excluyen ANTES de calcular: ni en el numerador ni en el
+denominador, ni en el global ni por departamento. Medido en prod ese día
+(cohorte madura): 44 TVs = 2,0 % del retail con recuperación 6,7 %; sin ellas
+«Home Entertainment» pasa del 13,1 % al 30,7 % (era el departamento entero
+arrastrado por los paneles) y el global sube 0,4 pp. Una TV se identifica por
+TAXONOMÍA (manifest.category = Televisions / subcategory con la palabra «TVs»,
+o amazon_category = Televisions), nunca por el texto: proyectores, monitores y
+soportes de TV NO son teles.
+
+⚠️ manifest.lpn NO es único (8.902 LPN repetidos en prod): un JOIN duplica
+filas y dispara la recuperación (salía un 51 % global). Por eso va con EXISTS.
+
 Se ejecuta UNA vez (o periódicamente) contra la BD; el monitor luego lee el
 JSON sin necesidad de levantar el backend ni la BD.
 
@@ -33,8 +47,18 @@ MIN_SAMPLE = 30
 # tiempo de venderse). Validado: <365d ~24%, >365d ~28%, >540d ~31%.
 MATURED_DAYS = 365
 # Fecha de referencia para calcular la antigüedad (pásala por --as-of para
-# resultados reproducibles; por defecto, hoy).
-DEFAULT_AS_OF = "2026-06-17"
+# resultados reproducibles; por defecto, hoy). ⚠️ Antes era una constante
+# "2026-06-17": relanzar el script sin --as-of NO refrescaba la cohorte.
+DEFAULT_AS_OF = datetime.now().strftime("%Y-%m-%d")
+
+# Una línea es TV solo si lo dice la taxonomía (misma regla que insights.find_tvs).
+SQL_ES_TV = """
+        (p.amazon_category = 'Televisions'
+         OR EXISTS (SELECT 1 FROM manifest m
+                    WHERE m.lpn = p.lpn
+                      AND (m.category ILIKE 'televisions'
+                           OR m.subcategory ~* '\\mTVs\\M')))
+"""
 
 
 def _db_url(env_path: str) -> str:
@@ -68,10 +92,11 @@ def main() -> int:
     conn = psycopg2.connect(url)
     conn.set_session(readonly=True, autocommit=True)
     base = pd.read_sql(
-        """
+        f"""
         SELECT p.lpn, p.id_a2z, p.amazon_category cat, p.amazon_department dept,
                p.purchase_price pp, p.purchase_date,
-               s.revenue
+               s.revenue,
+               {SQL_ES_TV} AS es_tv
         FROM physical_item p
         LEFT JOIN (
             SELECT lpn, SUM(final_price) revenue FROM sale GROUP BY lpn
@@ -96,10 +121,17 @@ def main() -> int:
     as_of = pd.Timestamp(args.as_of)
     base["held"] = (as_of - pd.to_datetime(base["purchase_date"], errors="coerce")).dt.days
     matured = base["held"] >= args.matured_days
-    valid = base[(base["est_retail"] > 0) & matured].copy()
+    base["es_tv"] = base["es_tv"].fillna(False).astype(bool)
+    con_retail = (base["est_retail"] > 0) & matured
+    # TVs fuera de TODA métrica (ver docstring): se quitan del numerador y del
+    # denominador. Su parte del valor del camión se queda con ellas (el reparto
+    # de arriba ya se hizo), así que el resto no hereda su retail.
+    tv_fuera = int((con_retail & base["es_tv"]).sum())
+    valid = base[con_retail & ~base["es_tv"]].copy()
     print(
         f"Madurez >= {args.matured_days} días: {len(valid)} de "
-        f"{(base['est_retail'] > 0).sum()} artículos con retail.",
+        f"{(base['est_retail'] > 0).sum()} artículos con retail "
+        f"({tv_fuera} TVs excluidas a propósito).",
     )
 
     def recovery_by(key: str) -> dict:
@@ -123,6 +155,8 @@ def main() -> int:
         "min_sample": args.min_sample,
         "matured_days": args.matured_days,
         "as_of": args.as_of,
+        # Las teles van aparte: NO están en ningún número de este fichero.
+        "tvs_excluidas": tv_fuera,
         "global": round(global_rec, 4),
         "by_department": recovery_by("dept"),
         "by_category": recovery_by("cat"),

@@ -24,7 +24,7 @@ from typing import Dict, List, Optional
 
 from .alerts import lot_family
 from .calculator import BidCalculator
-from .insights import ManifestInsights
+from .insights import GroupStats, ManifestInsights
 from .models import Auction
 from .recovery import DEFAULT_MULTIPLE, RecoveryModel, transport_key
 
@@ -63,6 +63,29 @@ class LotRanking:
         return asdict(self)
 
 
+def groups_without_tvs(insights: ManifestInsights) -> List[GroupStats]:
+    """Department groups with the TVs' retail taken OUT of their department.
+
+    Owner's rule (2026-08-17): TVs go apart and enter NO metric. Without this,
+    a lot with panels was penalised twice — its "Home Entertainment" weight
+    (TV retail included) pulled the blend down AND the TV retail was already
+    removed from the base — and, worse, the recovery it borrowed was the one
+    the TVs themselves had dragged to 12 %. Only the retail changes; the
+    groups keep their names so blending/coverage work as before.
+    """
+    tv_retail: Dict[str, float] = {}
+    for finding in insights.tvs:
+        key = (finding.item.department or "Desconocido").strip() or "Desconocido"
+        tv_retail[key] = tv_retail.get(key, 0.0) + finding.item.line_retail
+    out: List[GroupStats] = []
+    for g in insights.by_department:
+        retail = round(g.retail - tv_retail.get(g.name, 0.0), 2)
+        if retail <= 0:
+            continue
+        out.append(GroupStats(name=g.name, lines=g.lines, units=g.units, retail=retail))
+    return out
+
+
 def rank_lot(
     auction: Auction,
     insights: ManifestInsights,
@@ -75,7 +98,7 @@ def rank_lot(
     base_retail = insights.effective_retail or insights.total_retail
     retail = auction.retail_value or insights.total_retail
 
-    blend = model.blended(insights.by_department)
+    blend = model.blended(groups_without_tvs(insights))
     family = lot_family(auction.lot_type)
     rec = model.recommend_bid(
         base_retail, blend.recovery, calculator, family,
