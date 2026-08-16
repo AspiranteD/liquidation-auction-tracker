@@ -25,7 +25,7 @@ import logging
 import re
 import statistics
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Tuple
 
 from .models import ManifestItem
@@ -884,15 +884,25 @@ def deep_analyze(
     tv_units = sum(t.item.qty for t in tvs)
     tv_loss = round(sum(t.item.line_retail for t in tvs), 2)
 
+    # 🔴 Regla del dueño (2026-08-17): las TVs van APARTE y no entran en NINGUNA
+    # métrica. Aquí valen 0 €: no pueden ser un «regalado» (una tele barata sigue
+    # siendo una tele rota), no inflan el valor por caja con el que se estiman
+    # las cajas sin declarar, y no encabezan los artículos de más valor. Se
+    # conservan en la lista para que el peso y las unidades sigan clasificando
+    # bien el palé; solo se les quita el precio.
+    tv_ids = {id(t.item) for t in tvs}
+    sin_tv = [i for i in items if id(i) not in tv_ids]
+    valorables = [replace(i, unit_retail=0.0) if id(i) in tv_ids else i for i in items]
+
     # Precio real de TODO el manifiesto antes de juzgar nada: en paralelo cuesta minutos y
     # es lo único que distingue un regalado de verdad de un falso positivo (ver prewarm()).
     if resolver is not None:
-        resolver.prewarm([i.asin for i in items])
+        resolver.prewarm([i.asin for i in sin_tv])
         resolver.save_cache()
 
-    giveaways = find_giveaways(items, rules, resolver=resolver, max_verify=max_verify)
+    giveaways = find_giveaways(sin_tv, rules, resolver=resolver, max_verify=max_verify)
 
-    boxes, pallets = analyze_containers(items, rules, baselines)
+    boxes, pallets = analyze_containers(valorables, rules, baselines)
     suspicious_pallets = [p for p in pallets if p.suspicious]
 
     if not any(i.box_id for i in items):
@@ -905,7 +915,7 @@ def deep_analyze(
     if no_price:
         warnings.append(f"{no_price} líneas sin precio retail declarado.")
 
-    top_items = sorted(items, key=lambda i: i.line_retail, reverse=True)[:10]
+    top_items = sorted(sin_tv, key=lambda i: i.line_retail, reverse=True)[:10]
 
     return ManifestInsights(
         label=label,
