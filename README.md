@@ -1,5 +1,27 @@
 # liquidation-auction-tracker
 
+> # 🔴 ABSORBIDO por `reusalia-backend` (2026-08-17) — decisión del dueño (§7.9 del plan del Panel de Socios)
+>
+> Lo que este repo hacía en el PC de Guillem **ya corre en el servidor** (`reusalia-backend`),
+> con los datos en la BD y la operativa en la pestaña **Pujas** de `frontend-socios`
+> (`socios-reusalia.pages.dev/pujas`). Piezas y a dónde fueron:
+>
+> | Aquí (tracker) | Ahora (backend) |
+> |---|---|
+> | `data/manifests/*.csv` (182) | `bstock_manifest_item` (los 182 importados; el monitor carga los nuevos) |
+> | `insights.deep_analyze` (TVs, cajas, regalados, departamentos) | `scripts/services/bstock/analisis_lote.py` → `bstock_lot_analisis` (job tras `bstock_monitor`) |
+> | `scripts/build_recovery.py` → `data/recovery.json` | `scripts/services/bstock/recovery.py` → `bstock_recovery_departamento` (job semanal, sin TVs) |
+> | `calculator.py` (9 %) | `scripts/services/bstock/calculator.py` + espejo JS `frontend-socios/pujas-calc.js`; el % es del dueño (`config_empresa['bstock_pct_objetivo']`, 10 %) |
+> | `pipeline.py` (escalera 30/15/10/5, WhatsApp) | job `puja_recordatorio` (T-30, WhatsApp + email, una vez) |
+> | `digest` (PDF 09/12/21) | correo `pujas_del_dia` de las 09:00 **con PDF adjunto** (`pujas_pdf.py`), uno al día |
+> | `watch` (lotes nuevos) | `bstock_monitor` cada 6 h + sondeo de ids nuevos (Buy Now aparte) |
+>
+> ⛔ **Las tareas programadas de Windows de este repo (`Bstock Liquidation Tracker`, `Bstock Manifest
+> Watch`, `Bstock Digest 09/12/21`) se DESACTIVAN**: dos sistemas mandando avisos = avisos duplicados
+> y dos verdades. Este repo queda como **motor de referencia** (tests, análisis a mano con `cli lot`);
+> su `calculator.py` es un ESPEJO del del backend (país + N palés, test `test_espejo_backend_n_pallets_y_pais`).
+> Si vas a cambiar una regla de valoración, cámbiala en el backend y trae aquí la copia.
+
 A self-contained pipeline that monitors **Amazon EU liquidation auctions** on
 [B-Stock](https://bstock.com/amazoneu/), downloads the lot manifests, runs a
 profitability analysis and alerts you by email and/or WhatsApp when an auction
