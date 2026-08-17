@@ -54,6 +54,9 @@ DEFAULT_TRANSPORT_COSTS: Dict[str, float] = {
 # "2 Pallets" matched no tariff, transport silently counted as 0 EUR and the
 # max bid came out INFLATED (1,365 EUR instead of 1,108 on a 20,160 EUR lot).
 _PARTIAL_PALLET_RE = re.compile(r"^([123])\s+pallets?(\s+[a-z]{2})?$")
+# Cualquier otro «N Pallets» (5, 6…): tarifa de 4 como SUELO — devolver 0 € inflaría la
+# puja. Espejo EXACTO de scripts/services/bstock/calculator.py del backend (2026-08-17).
+_PALLET_ANY_RE = re.compile(r"^(\d+)\s+pallets?(\s+[a-z]{2})?$")
 
 
 @dataclass
@@ -104,19 +107,25 @@ class BidCalculator:
         self.bstock_fee_rate = bstock_fee_rate
         self.re_rate = re_rate
 
-    def transport_for(self, lot_type: Optional[str]) -> float:
+    def transport_for(self, lot_type: Optional[str], country: Optional[str] = None) -> float:
         """Look up the flat transport cost for a lot type (case-insensitive).
 
-        Unknown or missing types return 0.0, matching the spreadsheet's IFERROR
-        fallback.
+        Espejo de `BidCalculator.transport_for` del backend (scripts/services/bstock/calculator.py):
+        1-3 pallets se facturan como 4 (mismo hueco de camión); cualquier otro «N Pallets»
+        también (suelo); y para 4 palés el país decide (DE 790, PL 900, IT 750, resto 318,99).
+        Unknown or missing types return 0.0, matching the spreadsheet's IFERROR fallback.
         """
         if not lot_type:
             return 0.0
         normalized = lot_type.strip().lower()
-        # 1-3 pallets are billed as a 4-pallet load (same truck slot).
-        partial = _PARTIAL_PALLET_RE.match(normalized)
-        if partial:
-            normalized = f"4 pallets{partial.group(2) or ''}"
+        pallets = _PARTIAL_PALLET_RE.match(normalized) or _PALLET_ANY_RE.match(normalized)
+        if pallets:
+            normalized = f"4 pallets{pallets.group(2) or ''}"
+        if normalized == "4 pallets" and country:
+            country_key = f"4 pallets {country.strip().lower()}"
+            for key, value in self.transport_costs.items():
+                if key.lower() == country_key:
+                    return value
         for key, value in self.transport_costs.items():
             if key.lower() == normalized:
                 return value
@@ -135,16 +144,19 @@ class BidCalculator:
         return max(bid, 0.0)
 
     def max_bid_for_retail_pct(
-        self, retail_value: float, target_pct: float, lot_type: Optional[str]
+        self, retail_value: float, target_pct: float, lot_type: Optional[str],
+        country: Optional[str] = None,
     ) -> CostBreakdown:
         """Maximum bid so that landed cost is ``target_pct`` of ``retail_value``.
 
-        ``target_pct`` is a fraction, e.g. 0.30 for 30%.
+        ``target_pct`` is a fraction, e.g. 0.30 for 30%. ``country`` decide el transporte
+        de un lote de 4 palés (DE/PL/IT); el resto de la firma es la de siempre.
         """
-        transport = self.transport_for(lot_type)
+        transport = self.transport_for(lot_type, country)
         total_cost = retail_value * target_pct
         bid = self.max_bid_for_target_cost(total_cost, transport)
-        return self.cost_breakdown_for_bid(bid, lot_type, retail_value=retail_value)
+        return self.cost_breakdown_for_bid(bid, lot_type, retail_value=retail_value,
+                                           transport=transport)
 
     def cost_breakdown_for_bid(
         self,
@@ -152,6 +164,7 @@ class BidCalculator:
         lot_type: Optional[str],
         retail_value: Optional[float] = None,
         transport: Optional[float] = None,
+        country: Optional[str] = None,
     ) -> CostBreakdown:
         """Full landed-cost breakdown for a given ``bid``.
 
@@ -160,7 +173,7 @@ class BidCalculator:
             total_cost = (bid + transport + vat + fee) / (1 - RE_RATE)
         """
         if transport is None:
-            transport = self.transport_for(lot_type)
+            transport = self.transport_for(lot_type, country)
         vat = (transport + bid) * self.vat_rate
         bstock_fee = bid * self.bstock_fee_rate
         base = bid + transport + vat + bstock_fee

@@ -63,8 +63,11 @@ def test_part_load_pallets_cost_the_same_transport_as_four():
     assert calc.transport_for("2 Pallets") == cuatro
     assert calc.transport_for("3 Pallets") == cuatro
     assert calc.transport_for("2 Pallets DE") == calc.transport_for("4 Pallets DE")
-    # ...and an unknown type still falls back to 0, as before.
-    assert calc.transport_for("9 Pallets") == 0.0
+    # ...cualquier otro «N Pallets» (5, 6, 9) coge la tarifa de 4 como SUELO (espejo del
+    # backend desde el 2026-08-17: 0 € inflaría la puja); un tipo que NO es de palés
+    # sigue a 0, como antes.
+    assert calc.transport_for("9 Pallets") == cuatro
+    assert calc.transport_for("Container") == 0.0
 
 
 def test_max_bid_never_negative():
@@ -72,3 +75,23 @@ def test_max_bid_never_negative():
     # Tiny retail with expensive transport -> bid would be negative, clamp to 0.
     b = calc.max_bid_for_retail_pct(100.0, 0.25, "4 Pallets PL")
     assert b.bid == 0.0
+
+
+# ---------------------------------------------------------------------------
+# 2026-08-17: espejo con scripts/services/bstock/calculator.py de reusalia-backend
+# (el tracker está ABSORBIDO: la calculadora que manda es la del backend; esta es su copia).
+# ---------------------------------------------------------------------------
+def test_espejo_backend_n_pallets_y_pais():
+    from liquidation_tracker.calculator import BidCalculator, DEFAULT_TRANSPORT_COSTS
+    calc = BidCalculator()
+    # 5-6 palés: tarifa de 4 como suelo (antes daba 0 € ⇒ puja inflada)
+    assert calc.transport_for("6 Pallets") == DEFAULT_TRANSPORT_COSTS["4 Pallets"]
+    assert calc.transport_for("5 pallets") == DEFAULT_TRANSPORT_COSTS["4 Pallets"]
+    # país en 4 palés
+    assert calc.transport_for("4 Pallets", "DE") == 790.0
+    assert calc.transport_for("2 Pallets", "PL") == 900.0
+    assert calc.transport_for("4 Pallets", "ES") == 318.99
+    assert calc.transport_for("4 Pallets DE") == 790.0   # clave precompuesta (transport_key)
+    b = calc.max_bid_for_retail_pct(20000.0, 0.10, "4 Pallets", country="DE")
+    assert b.transport == 790.0 and b.bid > 0
+    assert abs(b.total_pct_of_retail - 0.10) < 0.0005
