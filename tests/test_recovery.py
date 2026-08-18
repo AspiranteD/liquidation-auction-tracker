@@ -66,3 +66,38 @@ def test_recommend_bid_uses_country_transport():
     de = m.recommend_bid(25000.0, 0.30, calc, "4 Pallets", country="DE")
     # DE transport is dearer, so for the same landed-cost target the bid is lower.
     assert de.bid < es.bid
+
+
+# --- El reloj de la madurez: la LLEGADA, no la compra (dueño, 2026-08-17) -----
+
+def test_el_reloj_de_madurez_prefiere_la_llegada_y_no_inventa_fechas():
+    """La regla que impide que la cohorte madura se llene de antigüedades falsas.
+
+    Importa porque `purchase_date` NO es una compra (es el `date_in` de Amazon) y
+    porque el alta tiene 33.315 filas selladas con el día en que corrió un script
+    de carga: contar eso como llegada es lo que produjo curvas de recuperación
+    plausibles y falsas.
+    """
+    import numpy as np
+    import pandas as pd
+
+    from scripts.build_recovery import SELLOS_ALTA, reloj_de_madurez
+
+    alta = pd.to_datetime(pd.Series([
+        "2026-04-20",   # alta normal -> manda la llegada
+        "2025-12-22",   # sello -> cae al date_in del manifiesto
+        "2025-12-22",   # sello Y date_in del mismo día -> no hay fecha
+        "2026-02-18",   # el otro sello
+    ]))
+    date_in = pd.to_datetime(pd.Series([
+        "2026-04-01", "2025-03-14", "2025-12-22", "2025-06-30",
+    ]))
+
+    reloj, origen = reloj_de_madurez(alta, date_in)
+
+    assert list(origen) == ["llegada", "manifiesto", "sin fecha", "manifiesto"]
+    assert reloj.iloc[0] == pd.Timestamp("2026-04-20")   # la llegada, no el date_in
+    assert reloj.iloc[1] == pd.Timestamp("2025-03-14")   # fallback documentado
+    assert pd.isna(reloj.iloc[2])                        # ⛔ no se inventa antigüedad
+    assert reloj.iloc[3] == pd.Timestamp("2025-06-30")
+    assert "2025-12-22" in SELLOS_ALTA and "2026-02-18" in SELLOS_ALTA

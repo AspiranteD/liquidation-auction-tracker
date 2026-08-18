@@ -19,6 +19,23 @@ soportes de TV NO son teles.
 ⚠️ manifest.lpn NO es único (8.902 LPN repetidos en prod): un JOIN duplica
 filas y dispara la recuperación (salía un 51 % global). Por eso va con EXISTS.
 
+🔴 EL RELOJ ES LA LLEGADA, NO LA COMPRA (decisión del dueño, 2026-08-17: «puja
+para el coste, llegada para la venta»; ver reusalia-backend/docs/FECHAS.md).
+`physical_item.purchase_date` NO es una compra: es el `date_in` del manifiesto,
+o sea cuándo metió AMAZON el artículo en el lote. La madurez se mide con:
+
+    1º `created_at` (la llegada al almacén) si no es un día de carga masiva;
+    2º si lo es, `purchase_date` — con ~13 días de desfase mediano, irrelevante
+       sobre una cohorte de 365 días, y es la ÚNICA fecha que tiene la mercancía
+       vieja: con `created_at` a secas la cohorte madura sale VACÍA (0 de 52.661),
+       porque el alta por pipeline no empieza hasta marzo-2026;
+    3º si `purchase_date` cae el mismo día del sello (1.334 uds), NO hay fecha y
+       el artículo se excluye, en vez de inventarle una antigüedad.
+
+🔴 Y el ingreso es NETO: una venta CANCELADA o REEMBOLSADA no es recuperación.
+Contarlas inflaba el global 0,65 pp (28,35 → 27,70 %) y «Home Entertainment»
+3,8 pp, que es justo el departamento con más devoluciones.
+
 Se ejecuta UNA vez (o periódicamente) contra la BD; el monitor luego lee el
 JSON sin necesidad de levantar el backend ni la BD.
 
@@ -51,6 +68,10 @@ MATURED_DAYS = 365
 # "2026-06-17": relanzar el script sin --as-of NO refrescaba la cohorte.
 DEFAULT_AS_OF = datetime.now().strftime("%Y-%m-%d")
 
+# Días en que una carga masiva estampó su propia fecha sobre mercancía de meses
+# antes: no son la llegada de nada (30.261 altas el 2025-12-22, 3.054 el 2026-02-18).
+SELLOS_ALTA = ("2025-12-22", "2026-02-18")
+
 # Una línea es TV solo si lo dice la taxonomía (misma regla que insights.find_tvs).
 SQL_ES_TV = """
         (p.amazon_category = 'Televisions'
@@ -59,6 +80,23 @@ SQL_ES_TV = """
                       AND (m.category ILIKE 'televisions'
                            OR m.subcategory ~* '\\mTVs\\M')))
 """
+
+
+def reloj_de_madurez(alta: pd.Series, date_in: pd.Series):
+    """Fecha desde la que se cuenta la antigüedad, y de dónde sale.
+
+    Regla entera (ver docstring del módulo): la LLEGADA manda; si el alta es un
+    día de carga masiva no vale como llegada y se cae al `date_in` del
+    manifiesto; y si ese `date_in` es el mismo día del sello, **no hay fecha** y
+    el artículo se queda fuera en vez de con una antigüedad inventada.
+
+    Devuelve `(reloj, origen)` — `origen` es 'llegada' / 'manifiesto' / 'sin fecha'.
+    """
+    es_sello = alta.isin([pd.Timestamp(d) for d in SELLOS_ALTA])
+    reloj = alta.where(~es_sello, date_in.where(date_in != alta))
+    origen = np.where(~es_sello, "llegada",
+                      np.where(reloj.notna(), "manifiesto", "sin fecha"))
+    return reloj, origen
 
 
 def _db_url(env_path: str) -> str:
@@ -94,12 +132,16 @@ def main() -> int:
     base = pd.read_sql(
         f"""
         SELECT p.lpn, p.id_a2z, p.amazon_category cat, p.amazon_department dept,
-               p.purchase_price pp, p.purchase_date,
+               p.purchase_price pp, p.purchase_date, p.created_at::date alta,
                s.revenue,
                {SQL_ES_TV} AS es_tv
         FROM physical_item p
         LEFT JOIN (
-            SELECT lpn, SUM(final_price) revenue FROM sale GROUP BY lpn
+            SELECT s.lpn, SUM(s.final_price) revenue
+              FROM sale s
+              JOIN dim_payment_status d ON d.status_id = s.payment_status_id
+             WHERE d.code NOT IN ('CANCELADO', 'REEMBOLSADO')
+             GROUP BY s.lpn
         ) s ON s.lpn = p.lpn
         """,
         conn,
@@ -119,7 +161,10 @@ def main() -> int:
     # Filtro de madurez: descarta artículos demasiado recientes (aún sin vender)
     # para no hundir la recuperación con stock que todavía rotará.
     as_of = pd.Timestamp(args.as_of)
-    base["held"] = (as_of - pd.to_datetime(base["purchase_date"], errors="coerce")).dt.days
+    alta = pd.to_datetime(base["alta"], errors="coerce")
+    date_in = pd.to_datetime(base["purchase_date"], errors="coerce")
+    reloj, base["reloj_origen"] = reloj_de_madurez(alta, date_in)
+    base["held"] = (as_of - reloj).dt.days
     matured = base["held"] >= args.matured_days
     base["es_tv"] = base["es_tv"].fillna(False).astype(bool)
     con_retail = (base["est_retail"] > 0) & matured
@@ -128,11 +173,14 @@ def main() -> int:
     # de arriba ya se hizo), así que el resto no hereda su retail.
     tv_fuera = int((con_retail & base["es_tv"]).sum())
     valid = base[con_retail & ~base["es_tv"]].copy()
+    sin_fecha = int(((base["est_retail"] > 0) & base["held"].isna()).sum())
+    origenes = valid["reloj_origen"].value_counts().to_dict()
     print(
         f"Madurez >= {args.matured_days} días: {len(valid)} de "
         f"{(base['est_retail'] > 0).sum()} artículos con retail "
-        f"({tv_fuera} TVs excluidas a propósito).",
+        f"({tv_fuera} TVs excluidas a propósito, {sin_fecha} sin fecha fiable).",
     )
+    print(f"  reloj: {origenes}")
 
     def recovery_by(key: str) -> dict:
         out = {}
@@ -157,6 +205,9 @@ def main() -> int:
         "as_of": args.as_of,
         # Las teles van aparte: NO están en ningún número de este fichero.
         "tvs_excluidas": tv_fuera,
+        "sin_fecha_fiable": sin_fecha,
+        "reloj": "llegada (created_at); date_in del manifiesto si el alta es carga masiva",
+        "ingreso": "neto (sin ventas CANCELADO/REEMBOLSADO)",
         "global": round(global_rec, 4),
         "by_department": recovery_by("dept"),
         "by_category": recovery_by("cat"),
